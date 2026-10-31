@@ -9,7 +9,7 @@ export interface Layout {
 }
 
 export function layout(width: number, height: number, rewardCount = 3): Layout {
-  const landscape = width > height * 1.24;
+  const landscape = height < 480 || width > height * 1.24;
   const pad = Math.max(12, Math.min(24, width * 0.035));
   const sideX = landscape ? Math.min(height - pad * 2, width * 0.56) + pad * 2 : pad;
   const sideW = landscape ? width - sideX - pad : width - 2 * pad;
@@ -64,7 +64,22 @@ export function dragMove(a: Pos, dx: number, dy: number, threshold: number): Mov
 }
 
 export type PhaseKind = 'swap' | 'clear' | 'fall' | 'enemy' | 'finish';
-export interface Phase { kind: PhaseKind; board: Board; duration: number; chain?: number; reshuffled?: boolean }
+export interface Phase { kind: PhaseKind; board: Board; duration: number; chain?: number; reshuffled?: boolean; dropRows?: number[][] }
+
+// Gravity preserves the order of the surviving cells in each column. New cells
+// enter as a stack immediately above the board, one row per cleared space.
+export function fallDistances(boardAfterClear: Board): number[][] {
+  const distances = boardAfterClear.map(row => row.map(() => 0));
+  for (let col = 0; col < (boardAfterClear[0]?.length ?? 0); col++) {
+    let emptyBelow = 0;
+    for (let row = boardAfterClear.length - 1; row >= 0; row--) {
+      if (boardAfterClear[row]?.[col] === null) emptyBelow++;
+      else distances[row + emptyBelow]![col] = emptyBelow;
+    }
+    for (let row = 0; row < emptyBelow; row++) distances[row]![col] = emptyBelow;
+  }
+  return distances;
+}
 
 export function sameBoard(a: Board, b: Board): boolean {
   return a.length === b.length && a.every((row, y) => row.length === b[y]?.length && row.every((cell, x) => {
@@ -78,9 +93,11 @@ export function buildTimeline(initial: Board, result: TurnResult): Phase[] {
   const phases: Phase[] = [{ kind: 'swap', board: initial, duration: 135 }];
   for (const step of result.steps) {
     phases.push({ kind: 'clear', board: step.boardAfterClear, duration: 160, chain: step.chain });
-    phases.push({ kind: 'fall', board: step.boardAfter, duration: 175, chain: step.chain });
+    phases.push({ kind: 'fall', board: step.boardAfter, duration: 175, chain: step.chain,
+      dropRows: fallDistances(step.boardAfterClear) });
   }
-  if (result.enemyAction) phases.push({ kind: 'enemy', board: phases[phases.length - 1]!.board, duration: 250 });
+  if (result.enemyAction) phases.push({ kind: 'enemy',
+    board: result.reshuffled ? result.state.board : phases[phases.length - 1]!.board, duration: 250 });
   const last = phases[phases.length - 1]!.board;
   phases.push({ kind: 'finish', board: result.state.board, duration: sameBoard(last, result.state.board) ? 100 : 210,
     reshuffled: result.reshuffled || !!result.enemyAction?.reshuffled });

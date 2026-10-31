@@ -58,6 +58,7 @@ function board(ctx: CanvasRenderingContext2D, shape: Layout, cells: Board, view:
   const swap = view.phase?.kind === 'swap' && view.move;
   const shake = view.reduced ? 0 : (view.shake ?? 0) * Math.sin((view.shake ?? 0) * 35) * 5;
   ctx.save(); ctx.translate(shake, 0);
+  ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
   for (let row = 0; row < BOARD_SIZE; row++) for (let col = 0; col < BOARD_SIZE; col++) {
     const x = b.x + col * s, y = b.y + row * s;
     ctx.fillStyle = (row + col) % 2 ? '#273442' : '#2d3b49';
@@ -73,7 +74,8 @@ function board(ctx: CanvasRenderingContext2D, shape: Layout, cells: Board, view:
       const other = row === a.row && col === a.col ? target : row === target.row && col === target.col ? a : null;
       if (other) { gx += (other.col - col) * s * view.progress; gy += (other.row - row) * s * view.progress; }
     }
-    if (view.phase?.kind === 'fall' && !view.reduced) gy -= (1 - view.progress) * s * .32;
+    if (view.phase?.kind === 'fall' && !view.reduced)
+      gy -= (1 - view.progress) * s * (view.phase.dropRows?.[row]?.[col] ?? 0);
     gem(ctx, entry, gx, gy, s);
   }
   ctx.restore();

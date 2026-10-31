@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTimeline, dragMove, hitCell, layout, neighboringMove, sameBoard } from '../src/ui/model';
+import { buildTimeline, dragMove, fallDistances, hitCell, layout, neighboringMove, sameBoard } from '../src/ui/model';
 import type { Board, TurnResult } from '../src/types';
 
 describe('canvas geometry and input', () => {
@@ -10,6 +10,17 @@ describe('canvas geometry and input', () => {
       expect(hitCell(shape, shape.board.x + shape.board.w, shape.board.y)).toBeNull();
       expect(shape.board.x).toBeGreaterThanOrEqual(0);
       expect(shape.board.y + shape.board.h).toBeLessThanOrEqual(h!);
+    }
+  });
+  it('keeps the entire board within short, portrait, and desktop canvases', () => {
+    for (const [width, height] of [[320, 320], [360, 640], [375, 812], [480, 400],
+      [640, 360], [800, 600], [1024, 768]]) {
+      const { board, landscape } = layout(width!, height!);
+      expect(board.x).toBeGreaterThanOrEqual(0);
+      expect(board.y).toBeGreaterThanOrEqual(0);
+      expect(board.x + board.w).toBeLessThanOrEqual(width!);
+      expect(board.y + board.h).toBeLessThanOrEqual(height!);
+      if (height! < 480) expect(landscape).toBe(true);
     }
   });
   it('requires adjacent clicks and chooses the strongest drag direction', () => {
@@ -34,6 +45,18 @@ describe('canvas geometry and input', () => {
 });
 
 describe('turn timeline', () => {
+  it('tracks each surviving cell and the new stack in its column', () => {
+    const red = { kind: 'gem', color: 'red' } as const;
+    const green = { kind: 'gem', color: 'green' } as const;
+    const junk = { kind: 'junk' } as const;
+    const cleared: Board = [[red, red, null], [null, green, red],
+      [green, junk, null], [null, red, junk]];
+    expect(fallDistances(cleared)).toEqual([
+      [2, 0, 2], [2, 0, 2], [2, 0, 1], [1, 0, 0],
+    ]);
+    expect(cleared[1]![0]).toBeNull();
+    expect(fallDistances([[red, junk], [green, red]])).toEqual([[0, 0], [0, 0]]);
+  });
   it('keeps all clear and refill snapshots before enemy and final reshuffle', () => {
     const board: Board = [[{ kind: 'gem', color: 'red' }]];
     const cleared: Board = [[null]];
@@ -48,6 +71,7 @@ describe('turn timeline', () => {
     const phases = buildTimeline(board, result);
     expect(phases.map(p => p.kind)).toEqual(['swap', 'clear', 'fall', 'enemy', 'finish']);
     expect(phases.map(p => p.board)).toEqual([board, cleared, refill, refill, final]);
+    expect(phases[2]?.dropRows).toEqual([[1]]);
     expect(phases.at(-1)?.reshuffled).toBe(true);
     expect(phases.reduce((n, p) => n + p.duration, 0)).toBeLessThan(2000);
     expect(sameBoard(board, [[{ kind: 'gem', color: 'red' }]])).toBe(true);
@@ -60,13 +84,16 @@ describe('turn timeline', () => {
   });
   it('marks the finish phase for player reshuffles even when the enemy acts', () => {
     const board: Board = [[{ kind: 'gem', color: 'red' }]];
+    const final: Board = [[{ kind: 'gem', color: 'green' }]];
     const result: TurnResult = {
       valid: true, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: true,
       enemyAction: { attack: 1, shieldAbsorbed: 0, hpLost: 1, junkAdded: 0, reshuffled: false },
-      state: { board, player: { hp: 9, maxHp: 10, gold: 0, colors: ['red', 'purple', 'green'],
+      state: { board: final, player: { hp: 9, maxHp: 10, gold: 0, colors: ['red', 'purple', 'green'],
         colorLevels: { red: 0, purple: 0, green: 0, yellow: 0 }, relics: [] }, shield: 0,
         enemy: { id: 'test', hp: 10, countdown: 2 }, turn: 1, status: 'ongoing', rngState: 1 },
     };
+    expect(buildTimeline(board, result).find(p => p.kind === 'enemy')?.board).toBe(final);
+    expect(buildTimeline(board, { ...result, reshuffled: false }).find(p => p.kind === 'enemy')?.board).toBe(board);
     expect(buildTimeline(board, result).at(-1)?.reshuffled).toBe(true);
     expect(buildTimeline(board, { ...result, enemyAction: null }).at(-1)?.reshuffled).toBe(true);
     expect(buildTimeline(board, { ...result, reshuffled: false }).at(-1)?.reshuffled).toBe(false);
