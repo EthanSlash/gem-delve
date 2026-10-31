@@ -1,0 +1,17 @@
+{
+  "name": "gem-delve",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "sim": "tsx sim/index.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.11",
+    "vitest": "^4.0.1"
+  }
+}
