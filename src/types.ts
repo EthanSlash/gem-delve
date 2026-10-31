@@ -235,6 +235,28 @@ export interface CombatApi {
   applyTurn(state: CombatState, move: Move, content: GameContent): TurnResult;
 }
 
+export type SoundEvent =
+  | 'select'
+  | 'invalid'
+  | 'match'
+  | 'hit'
+  | 'shield'
+  | 'heal'
+  | 'gold'
+  | 'enemyAttack'
+  | 'reward'
+  | 'win'
+  | 'lose';
+
+// Implemented by src/audio/index.ts as `createAudio(): GameAudio`.
+export interface GameAudio {
+  // level raises the pitch of 'match' for longer chains: 1 is the first match.
+  // Never throws, and does nothing while muted or where Web Audio is missing.
+  play(event: SoundEvent, level?: number): void;
+  setMuted(muted: boolean): void;
+  isMuted(): boolean;
+}
+
 export type RewardOption =
   | { type: 'relic'; relicId: RelicId }
   | { type: 'upgradeColor'; color: GemColor }
