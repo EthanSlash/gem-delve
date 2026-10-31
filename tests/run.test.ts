@@ -82,7 +82,7 @@ describe('run', () => {
     game.enemies[0]!.countdown = 1;
     game.balance.perGem = { red: 0, purple: 0, green: 0, yellow: 0 };
     const start = api.createRun(5, game), before = structuredClone(start);
-    const empty = { valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, enemyAction: null, state: start.combat };
+    const empty = { valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: false, enemyAction: null, state: start.combat };
     expect(api.playMove(start, invalid, game)).toEqual({ turn: empty, run: start });
     const { run: lost, turn } = api.playMove(start, firstMove(start), game);
     expect(turn.valid).toBe(true);

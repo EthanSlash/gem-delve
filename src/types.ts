@@ -209,6 +209,8 @@ export interface TurnResult {
   valid: boolean;
   steps: CascadeStep[];
   effects: EffectTotals;
+  // True if the board was reshuffled after the player's cascades, before any enemy action.
+  reshuffled: boolean;
   // Null if the enemy did not act this turn.
   enemyAction: EnemyAction | null;
   state: CombatState;

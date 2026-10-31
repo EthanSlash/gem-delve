@@ -39,7 +39,7 @@ export function createCombat(player: PlayerState, enemy: EnemyDef, content: Game
 
 export function applyTurn(state: CombatState, move: Move, content: GameContent): TurnResult {
   const empty = (): TurnResult => ({
-    valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, enemyAction: null, state,
+    valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: false, enemyAction: null, state,
   });
   if (state.status !== 'ongoing') return empty();
   const rng = createRng(state.rngState);
@@ -102,5 +102,5 @@ export function applyTurn(state: CombatState, move: Move, content: GameContent):
     }
     if (next.player.hp <= 0) next.status = 'lost';
   }
-  return { valid: true, steps: result.steps, effects: totals, enemyAction, state: next };
+  return { valid: true, steps: result.steps, effects: totals, reshuffled: result.reshuffled, enemyAction, state: next };
 }

@@ -1,0 +1,70 @@
+import type { GameContent } from '../types';
+
+export const GAME_CONTENT: GameContent = {
+  enemies: [
+    { id: 'slime', name: '史萊姆', maxHp: 40, attack: 6, countdown: 3, junkPerAction: 1, isBoss: false },
+    { id: 'caveBat', name: '洞穴蝙蝠', maxHp: 70, attack: 9, countdown: 3, junkPerAction: 1, isBoss: false },
+    { id: 'skeleton', name: '骷髏戰士', maxHp: 100, attack: 11, countdown: 3, junkPerAction: 2, isBoss: false },
+    { id: 'gargoyle', name: '石像鬼', maxHp: 130, attack: 13, countdown: 3, junkPerAction: 2, isBoss: false },
+    { id: 'slimeKing', name: '史萊姆王', maxHp: 160, attack: 16, countdown: 3, junkPerAction: 3, isBoss: true },
+  ],
+  relics: [
+    {
+      id: 'flameCharm',
+      name: '烈焰護符',
+      description: '紅色寶石每組額外造成 2 點傷害。',
+      effects: [{ type: 'colorFlat', color: 'red', flat: 2 }],
+    },
+    {
+      id: 'chainPendant',
+      name: '連鎖吊墜',
+      description: '每多一層連鎖，倍率額外增加 0.2。',
+      effects: [{ type: 'chainBonus', bonus: 0.2 }],
+    },
+    {
+      id: 'giantBadge',
+      name: '巨力徽章',
+      description: '清除 4 顆以上寶石的組別，價值乘以 2。',
+      effects: [{ type: 'bigMatch', minSize: 4, multiplier: 2 }],
+    },
+    {
+      id: 'guardianShield',
+      name: '守護之盾',
+      description: '每場戰鬥開始時獲得 10 點護盾。',
+      effects: [{ type: 'startShield', amount: 10 }],
+    },
+    {
+      id: 'lifeHeart',
+      name: '生命之心',
+      description: '最大生命提高 15 點，並立即回復 15 點。',
+      effects: [{ type: 'maxHp', amount: 15 }],
+    },
+    {
+      id: 'sturdyBulwark',
+      name: '堅韌壁壘',
+      description: '敵人攻擊後保留 0.5（50%）的護盾。',
+      effects: [{ type: 'shieldRetain', ratio: 0.5 }],
+    },
+    {
+      id: 'purifyPotion',
+      name: '淨化藥劑',
+      description: '每清除 1 顆廢石，回復 3 點生命。',
+      effects: [{ type: 'junkHeal', amount: 3 }],
+    },
+    {
+      id: 'slowHourglass',
+      name: '緩速沙漏',
+      description: '每個敵人的倒數增加 1。',
+      effects: [{ type: 'enemyCountdown', delta: 1 }],
+    },
+  ],
+  balance: {
+    playerMaxHp: 60,
+    perGem: { red: 3, purple: 2, green: 1, yellow: 1 },
+    chainBonus: 0.5,
+    levelBonus: 0.25,
+    rewardOptionCount: 3,
+    rerollCost: 15,
+    healAfterCombat: 0.2,
+  },
+};

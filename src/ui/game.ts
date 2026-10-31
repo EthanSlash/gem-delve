@@ -1,0 +1,179 @@
+import { createAudio } from '../audio/index';
+import { findValidMoves } from '../core/index';
+import { GAME_CONTENT } from '../data/index';
+import { chooseReward, createRun, playMove, rerollRewards } from '../run/index';
+import type { Move, Pos, RunState, RunTurnResult } from '../types';
+import { draw } from './draw';
+import type { View } from './draw';
+import { buildTimeline, contains, dragMove, hitCell, layout, neighboringMove } from './model';
+import type { Layout, Phase } from './model';
+
+function freshSeed(): number {
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return bytes[0]!;
+}
+
+export function startGame(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const audio = createAudio();
+  const requested = new URLSearchParams(location.search).get('seed');
+  const parsed = requested === null ? NaN : Number(requested);
+  let nextSeed = requested !== null && requested.trim() !== '' && Number.isSafeInteger(parsed) ? parsed >>> 0 : freshSeed();
+  let run: RunState | null = null;
+  let screen: View['screen'] = 'title';
+  let shape: Layout;
+  let selected: Pos | undefined;
+  let press: { pos: Pos; x: number; y: number; id: number } | null = null;
+  let animation: { result: RunTurnResult; phases: Phase[]; move: Move; start: number; last: number } | null = null;
+  let invalidUntil = 0;
+  let raf = 0;
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(1, rect.width), height = Math.max(1, rect.height);
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+    ctx!.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
+    shape = layout(width, height, run?.rewards?.length ?? GAME_CONTENT.balance.rewardOptionCount);
+    render();
+  }
+
+  function soundPhase(phase: Phase) {
+    if (phase.kind === 'clear') {
+      audio.play('match', phase.chain);
+      if (phase.chain === 1) {
+        if (animation?.result.turn.effects.damage) audio.play('hit');
+        if (animation?.result.turn.effects.shield) audio.play('shield');
+        if (animation?.result.turn.effects.heal) audio.play('heal');
+        if (animation?.result.turn.effects.gold) audio.play('gold');
+      }
+    }
+    if (phase.kind === 'enemy') audio.play('enemyAttack');
+  }
+
+  function frame(time: number) {
+    raf = 0;
+    if (animation) {
+      const elapsed = time - animation.start;
+      let offset = 0, index = 0;
+      for (; index < animation.phases.length - 1 && elapsed >= offset + animation.phases[index]!.duration; index++)
+        offset += animation.phases[index]!.duration;
+      if (index !== animation.last) {
+        for (let i = animation.last + 1; i <= index; i++) soundPhase(animation.phases[i]!);
+        animation.last = index;
+      }
+      const total = animation.phases.reduce((n, p) => n + p.duration, 0);
+      if (elapsed >= total) {
+        run = animation.result.run;
+        screen = run.status;
+        shape = layout(shape.width, shape.height, run.rewards?.length ?? GAME_CONTENT.balance.rewardOptionCount);
+        if (screen === 'won') audio.play('win');
+        if (screen === 'lost') audio.play('lose');
+        if (screen === 'reward') audio.play('reward');
+        animation = null;
+      }
+    }
+    render(time);
+    if (animation || time < invalidUntil) raf = requestAnimationFrame(frame);
+  }
+
+  function render(now = performance.now()) {
+    if (!shape) return;
+    let phase: Phase | undefined, progress = 0;
+    if (animation) {
+      const elapsed = Math.max(0, now - animation.start);
+      let offset = 0;
+      for (const item of animation.phases) {
+        phase = item;
+        if (elapsed < offset + item.duration) { progress = Math.min(1, (elapsed - offset) / item.duration); break; }
+        offset += item.duration;
+      }
+    }
+    draw(ctx!, shape, {
+      screen, run, board: phase?.board ?? run?.combat?.board, phase, progress,
+      move: animation?.move, turn: animation?.result.turn, selected,
+      shake: now < invalidUntil ? (invalidUntil - now) / 260 : 0,
+      muted: audio.isMuted(), reduced,
+    }, GAME_CONTENT);
+  }
+
+  function play(move: Move) {
+    if (!run || screen !== 'combat' || animation || performance.now() < invalidUntil) return;
+    const result = playMove(run, move, GAME_CONTENT);
+    selected = undefined;
+    if (!result.turn.valid) {
+      audio.play('invalid'); invalidUntil = performance.now() + 260;
+      if (!raf) raf = requestAnimationFrame(frame);
+      return;
+    }
+    animation = { result, phases: buildTimeline(run.combat!.board, result.turn), move, start: performance.now(), last: -1 };
+    if (!raf) raf = requestAnimationFrame(frame);
+  }
+
+  function pickReward(index: number) {
+    if (!run || screen !== 'reward' || animation) return;
+    const next = chooseReward(run, index, GAME_CONTENT);
+    if (next === run) return;
+    run = next; screen = run.status; selected = undefined;
+    audio.play('reward'); render();
+  }
+
+  function point(event: PointerEvent) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * shape.width / rect.width,
+      y: (event.clientY - rect.top) * shape.height / rect.height };
+  }
+
+  canvas.addEventListener('pointerdown', event => {
+    if (animation || performance.now() < invalidUntil) return;
+    const p = point(event);
+    const pos = screen === 'combat' ? hitCell(shape, p.x, p.y) : null;
+    press = pos ? { pos, x: p.x, y: p.y, id: event.pointerId } : null;
+    if (pos) canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('pointercancel', () => { press = null; });
+  canvas.addEventListener('pointerup', event => {
+    if (animation || performance.now() < invalidUntil) { press = null; return; }
+    const p = point(event);
+    if (screen === 'title' || screen === 'won' || screen === 'lost') {
+      if (contains(shape.primary, p.x, p.y)) {
+        run = createRun(nextSeed, GAME_CONTENT); nextSeed = freshSeed(); screen = 'combat'; selected = undefined;
+        audio.play('select'); render();
+      }
+    } else if (screen === 'reward' && run) {
+      const i = shape.cards.findIndex(r => contains(r, p.x, p.y));
+      if (i >= 0 && i < (run.rewards?.length ?? 0)) pickReward(i);
+      else if (contains(shape.reroll, p.x, p.y) && run.player.gold >= GAME_CONTENT.balance.rerollCost) {
+        run = rerollRewards(run, GAME_CONTENT); audio.play('reward'); render();
+      }
+    } else if (screen === 'combat') {
+      if (contains(shape.mute, p.x, p.y)) { audio.setMuted(!audio.isMuted()); render(); }
+      else if (press?.id === event.pointerId) {
+        const dragging = dragMove(press.pos, p.x - press.x, p.y - press.y, shape.cell * .22);
+        if (dragging) play(dragging);
+        else {
+          const pos = hitCell(shape, p.x, p.y);
+          if (pos) {
+            const move = selected && neighboringMove(selected, pos);
+            if (move) play(move);
+            else { selected = pos; audio.play('select'); render(); }
+          }
+        }
+      }
+    }
+    press = null;
+  });
+  window.addEventListener('resize', resize);
+  resize();
+
+  if (import.meta.env.DEV) {
+    Object.assign(window, { __gemDelve: {
+      getRun: () => run,
+      getValidMoves: () => run?.status === 'combat' && run.combat ? findValidMoves(run.combat.board) : [],
+      play, chooseReward: pickReward, isAnimating: () => animation !== null || performance.now() < invalidUntil,
+    } });
+  }
+}

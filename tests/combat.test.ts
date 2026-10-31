@@ -172,7 +172,7 @@ describe('combat', () => {
     const s = state(), c = content(); single(s);
     const before = structuredClone(s), oldContent = structuredClone(c), oldMove = structuredClone(move);
     const invalid = { a: { row: -1, col: 0 }, b: { row: 0, col: 0 } };
-    const empty = { valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, enemyAction: null, state: s };
+    const empty = { valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: false, enemyAction: null, state: s };
     expect(api.applyTurn(s, invalid, c)).toEqual(empty);
     for (const status of ['won', 'lost'] as const) {
       const finished = { ...s, status };

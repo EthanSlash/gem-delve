@@ -1,0 +1,74 @@
+import { describe, expect, it } from 'vitest';
+import { buildTimeline, dragMove, hitCell, layout, neighboringMove, sameBoard } from '../src/ui/model';
+import type { Board, TurnResult } from '../src/types';
+
+describe('canvas geometry and input', () => {
+  it('hits only cells inside the board at phone and desktop sizes', () => {
+    for (const [w, h] of [[360, 640], [900, 450], [1300, 900]]) {
+      const shape = layout(w!, h!);
+      expect(hitCell(shape, shape.board.x + shape.cell * 2.5, shape.board.y + shape.cell * 4.5)).toEqual({ row: 4, col: 2 });
+      expect(hitCell(shape, shape.board.x + shape.board.w, shape.board.y)).toBeNull();
+      expect(shape.board.x).toBeGreaterThanOrEqual(0);
+      expect(shape.board.y + shape.board.h).toBeLessThanOrEqual(h!);
+    }
+  });
+  it('requires adjacent clicks and chooses the strongest drag direction', () => {
+    const a = { row: 2, col: 2 };
+    expect(neighboringMove(a, { row: 3, col: 2 })?.b).toEqual({ row: 3, col: 2 });
+    expect(neighboringMove(a, { row: 3, col: 3 })).toBeNull();
+    expect(dragMove(a, -32, 12, 14)?.b).toEqual({ row: 2, col: 1 });
+    expect(dragMove(a, 4, 5, 14)).toBeNull();
+    expect(dragMove({ row: 0, col: 0 }, -30, 0, 14)).toBeNull();
+  });
+  it('centers reward cards across wide screens and keeps the legend by the stats', () => {
+    const wide = layout(1024, 768);
+    expect(wide.cards.map(card => card.y)).toEqual([wide.cards[0]!.y, wide.cards[0]!.y, wide.cards[0]!.y]);
+    expect(wide.cards[0]!.x).toBeLessThan(wide.board.x + wide.board.w);
+    expect(wide.cards[2]!.x + wide.cards[2]!.w).toBeGreaterThan(wide.stats.x);
+    expect(wide.cards[0]!.x + wide.cards[2]!.x + wide.cards[2]!.w).toBeCloseTo(wide.width);
+    expect(wide.legend.y).toBe(wide.stats.y + wide.stats.h + 12);
+    const phone = layout(375, 812);
+    expect(phone.cards[0]!.x).toBe(phone.cards[1]!.x);
+    expect(phone.cards[1]!.y).toBeGreaterThan(phone.cards[0]!.y);
+  });
+});
+
+describe('turn timeline', () => {
+  it('keeps all clear and refill snapshots before enemy and final reshuffle', () => {
+    const board: Board = [[{ kind: 'gem', color: 'red' }]];
+    const cleared: Board = [[null]];
+    const refill: Board = [[{ kind: 'gem', color: 'green' }]];
+    const final: Board = [[{ kind: 'junk' }]];
+    const result: TurnResult = { valid: true, steps: [{ chain: 2, groups: [], clearedJunk: [], boardAfterClear: cleared, boardAfter: refill }],
+      effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: false,
+      enemyAction: { attack: 3, shieldAbsorbed: 0, hpLost: 3, junkAdded: 1, reshuffled: true },
+      state: { board: final, player: { hp: 7, maxHp: 10, gold: 0, colors: ['red', 'purple', 'green'],
+        colorLevels: { red: 0, purple: 0, green: 0, yellow: 0 }, relics: [] }, shield: 0,
+        enemy: { id: 'test', hp: 10, countdown: 2 }, turn: 1, status: 'ongoing', rngState: 1 } };
+    const phases = buildTimeline(board, result);
+    expect(phases.map(p => p.kind)).toEqual(['swap', 'clear', 'fall', 'enemy', 'finish']);
+    expect(phases.map(p => p.board)).toEqual([board, cleared, refill, refill, final]);
+    expect(phases.at(-1)?.reshuffled).toBe(true);
+    expect(phases.reduce((n, p) => n + p.duration, 0)).toBeLessThan(2000);
+    expect(sameBoard(board, [[{ kind: 'gem', color: 'red' }]])).toBe(true);
+    expect(sameBoard(board, final)).toBe(false);
+    const long = buildTimeline(board, { ...result, steps: Array.from({ length: 12 }, (_, i) => ({
+      chain: i + 1, groups: [], clearedJunk: [], boardAfterClear: cleared, boardAfter: refill,
+    })) });
+    expect(long.filter(p => p.kind === 'clear').length).toBe(12);
+    expect(long.reduce((n, p) => n + p.duration, 0)).toBeLessThanOrEqual(1751);
+  });
+  it('marks the finish phase for player reshuffles even when the enemy acts', () => {
+    const board: Board = [[{ kind: 'gem', color: 'red' }]];
+    const result: TurnResult = {
+      valid: true, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: true,
+      enemyAction: { attack: 1, shieldAbsorbed: 0, hpLost: 1, junkAdded: 0, reshuffled: false },
+      state: { board, player: { hp: 9, maxHp: 10, gold: 0, colors: ['red', 'purple', 'green'],
+        colorLevels: { red: 0, purple: 0, green: 0, yellow: 0 }, relics: [] }, shield: 0,
+        enemy: { id: 'test', hp: 10, countdown: 2 }, turn: 1, status: 'ongoing', rngState: 1 },
+    };
+    expect(buildTimeline(board, result).at(-1)?.reshuffled).toBe(true);
+    expect(buildTimeline(board, { ...result, enemyAction: null }).at(-1)?.reshuffled).toBe(true);
+    expect(buildTimeline(board, { ...result, reshuffled: false }).at(-1)?.reshuffled).toBe(false);
+  });
+});
