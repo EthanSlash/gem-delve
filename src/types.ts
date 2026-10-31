@@ -81,13 +81,17 @@ export interface CoreApi {
   // Invalid when: out of bounds, not orthogonally adjacent, either cell is junk,
   // or the swap creates no match.
   applyMove(board: Board, move: Move, rng: Rng, colors: readonly GemColor[]): MoveResult;
-  // Junk stays in place, gems are rearranged. Result has no match and at least one valid move.
-  // If rearranging fails after a bounded number of tries, gems are regenerated from colors.
-  // Must always terminate and must never return an unplayable board.
+  // Result has no match and at least one valid move. Must always terminate and must never
+  // return an unplayable board. Tries, in order:
+  //   1. Rearrange the existing gems, junk stays in place, for a bounded number of tries.
+  //   2. Regenerate gems from colors, junk stays in place, for a bounded number of tries.
+  //   3. A junk layout can make this impossible (a junk checkerboard leaves no two gems
+  //      adjacent). Turn one random junk cell into a gem and go back to step 2. Repeat as
+  //      needed; a board with no junk is always solvable.
   reshuffle(board: Board, rng: Rng, colors: readonly GemColor[]): Board;
   // Turns up to count random gems into junk, then reshuffles if needed so the board stays
-  // playable. Never creates a match. A board with no gems left cannot occur: conversion
-  // stops once fewer than half the cells would remain gems.
+  // playable. Never creates a match. Conversion stops once fewer than half the cells would
+  // remain gems. The final junk count can be lower than requested if reshuffle removes junk.
   addJunk(
     board: Board,
     count: number,
