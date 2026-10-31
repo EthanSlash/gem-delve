@@ -120,7 +120,9 @@ export type RelicEffect =
   // Heals this amount for each junk cell cleared.
   | { type: 'junkHeal'; amount: number }
   // Added to each enemy's countdown length. Result is never below 1.
-  | { type: 'enemyCountdown'; delta: number };
+  | { type: 'enemyCountdown'; delta: number }
+  // Multiplies the enemy's attack. Effects multiply together, and the result is floored.
+  | { type: 'enemyAttack'; multiplier: number };
 
 export interface RelicDef {
   id: RelicId;

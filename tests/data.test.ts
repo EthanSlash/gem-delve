@@ -18,6 +18,8 @@ const effectNumbers = (effect: RelicEffect): number[] => {
       return [effect.ratio];
     case 'enemyCountdown':
       return [effect.delta];
+    case 'enemyAttack':
+      return [effect.multiplier];
   }
 };
 
@@ -62,7 +64,7 @@ describe('game content', () => {
     const types = new Set(relics.flatMap(relic => relic.effects.map(effect => effect.type)));
     expect(types).toEqual(new Set([
       'colorFlat', 'chainBonus', 'bigMatch', 'startShield',
-      'maxHp', 'shieldRetain', 'junkHeal', 'enemyCountdown',
+      'maxHp', 'shieldRetain', 'junkHeal', 'enemyCountdown', 'enemyAttack',
     ]));
 
     for (const relic of relics) {

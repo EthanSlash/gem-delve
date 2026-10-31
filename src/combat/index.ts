@@ -88,8 +88,11 @@ export function applyTurn(state: CombatState, move: Move, content: GameContent):
   } else {
     next.enemy.countdown--;
     if (next.enemy.countdown <= 0) {
-      const shieldAbsorbed = Math.min(next.shield, enemyDef.attack);
-      const hpLost = Math.min(next.player.hp, enemyDef.attack - shieldAbsorbed);
+      const attack = Math.floor(enemyDef.attack * relics.reduce(
+        (product, effect) => product * (effect.type === 'enemyAttack' ? effect.multiplier : 1), 1,
+      ));
+      const shieldAbsorbed = Math.min(next.shield, attack);
+      const hpLost = Math.min(next.player.hp, attack - shieldAbsorbed);
       next.player.hp -= hpLost;
       const retain = Math.min(1, relics.reduce((sum, effect) => sum + (effect.type === 'shieldRetain' ? effect.ratio : 0), 0));
       next.shield = Math.floor((next.shield - shieldAbsorbed) * retain);
@@ -98,7 +101,7 @@ export function applyTurn(state: CombatState, move: Move, content: GameContent):
       next.board = junk.board;
       next.enemy.countdown = countdown(enemyDef, relics);
       next.rngState = rng.state();
-      enemyAction = { attack: enemyDef.attack, shieldAbsorbed, hpLost, junkAdded: Math.max(0, junkCount(junk.board) - before), reshuffled: junk.reshuffled };
+      enemyAction = { attack, shieldAbsorbed, hpLost, junkAdded: Math.max(0, junkCount(junk.board) - before), reshuffled: junk.reshuffled };
     }
     if (next.player.hp <= 0) next.status = 'lost';
   }

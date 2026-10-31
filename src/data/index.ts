@@ -2,11 +2,11 @@ import type { GameContent } from '../types';
 
 export const GAME_CONTENT: GameContent = {
   enemies: [
-    { id: 'slime', name: '史萊姆', maxHp: 120, attack: 18, countdown: 2, junkPerAction: 1, isBoss: false },
-    { id: 'caveBat', name: '洞穴蝙蝠', maxHp: 210, attack: 27, countdown: 2, junkPerAction: 1, isBoss: false },
-    { id: 'skeleton', name: '骷髏戰士', maxHp: 300, attack: 33, countdown: 2, junkPerAction: 2, isBoss: false },
-    { id: 'gargoyle', name: '石像鬼', maxHp: 390, attack: 39, countdown: 2, junkPerAction: 2, isBoss: false },
-    { id: 'slimeKing', name: '史萊姆王', maxHp: 480, attack: 48, countdown: 2, junkPerAction: 3, isBoss: true },
+    { id: 'slime', name: '史萊姆', maxHp: 120, attack: 17, countdown: 2, junkPerAction: 1, isBoss: false },
+    { id: 'caveBat', name: '洞穴蝙蝠', maxHp: 210, attack: 25, countdown: 2, junkPerAction: 1, isBoss: false },
+    { id: 'skeleton', name: '骷髏戰士', maxHp: 300, attack: 30, countdown: 2, junkPerAction: 2, isBoss: false },
+    { id: 'gargoyle', name: '石像鬼', maxHp: 390, attack: 36, countdown: 2, junkPerAction: 2, isBoss: false },
+    { id: 'slimeKing', name: '史萊姆王', maxHp: 480, attack: 44, countdown: 2, junkPerAction: 3, isBoss: true },
   ],
   relics: [
     {
@@ -54,8 +54,8 @@ export const GAME_CONTENT: GameContent = {
     {
       id: 'slowHourglass',
       name: '緩速沙漏',
-      description: '每個敵人的倒數增加 1。',
-      effects: [{ type: 'enemyCountdown', delta: 1 }],
+      description: '敵人倒數增加 1，但攻擊力變為 1.25 倍。',
+      effects: [{ type: 'enemyCountdown', delta: 1 }, { type: 'enemyAttack', multiplier: 1.25 }],
     },
   ],
   balance: {

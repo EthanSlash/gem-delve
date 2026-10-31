@@ -132,6 +132,27 @@ describe('combat', () => {
     }
   });
 
+  it('floors modified enemy attack and reports its shield and hp damage', () => {
+    const s = state(), c = content(); single(s);
+    s.shield = 3; s.enemy.countdown = 1;
+    equip(s, c, [{ type: 'enemyAttack', multiplier: 0.7 }]);
+    const result = api.applyTurn(s, move, c);
+    expect(result.enemyAction).toEqual({ attack: 5, shieldAbsorbed: 3, hpLost: 2, junkAdded: 0, reshuffled: false });
+    expect(result.state.player.hp).toBe(18);
+    expect(result.state.shield).toBe(0);
+  });
+
+  it('stacks enemy attack multipliers across relics before flooring', () => {
+    const s = state(), c = content(); single(s);
+    s.shield = 6; s.enemy.countdown = 1;
+    equip(s, c, [{ type: 'enemyAttack', multiplier: 0.7 }]);
+    s.player.relics.push('second');
+    c.relics.push({ id: 'second', name: '', description: '', effects: [{ type: 'enemyAttack', multiplier: 1.5 }] });
+    const result = api.applyTurn(s, move, c);
+    expect(result.enemyAction).toEqual({ attack: 8, shieldAbsorbed: 6, hpLost: 2, junkAdded: 0, reshuffled: false });
+    expect(result.state.player.hp).toBe(18);
+  });
+
   it('counts down and resets to at least one, and reports lethal damage as actual hp lost', () => {
     const s = state(), c = content(); single(s);
     s.enemy.countdown = 2;
