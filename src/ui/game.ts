@@ -5,6 +5,7 @@ import { chooseReward, createRun, playMove, rerollRewards } from '../run/index';
 import type { Move, Pos, RunState, RunTurnResult } from '../types';
 import { draw } from './draw';
 import type { View } from './draw';
+import { Effects } from './fx';
 import { buildTimeline, contains, dragMove, hitCell, layout, neighboringMove } from './model';
 import type { Layout, Phase } from './model';
 
@@ -30,6 +31,12 @@ export function startGame(canvas: HTMLCanvasElement) {
   let invalidUntil = 0;
   let raf = 0;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const fx = new Effects(reduced);
+  let lastFrame = 0;
+
+  function schedule() {
+    if (!raf) { lastFrame = performance.now(); raf = requestAnimationFrame(frame); }
+  }
 
   function resize() {
     const rect = canvas.getBoundingClientRect();
@@ -43,19 +50,31 @@ export function startGame(canvas: HTMLCanvasElement) {
 
   function soundPhase(phase: Phase) {
     if (phase.kind === 'clear') {
+      for (const group of phase.groups ?? []) for (const cell of group.cells)
+        fx.burst(shape.board.x + (cell.col + .5) * shape.cell, shape.board.y + (cell.row + .5) * shape.cell, group.color, shape.cell);
       audio.play('match', phase.chain);
       if (phase.chain === 1) {
+        const effects = animation!.result.turn.effects;
+        if (effects.damage) {
+          fx.hit(); fx.setHp(run!.combat!.enemy.hp, animation!.result.turn.state.enemy.hp);
+          fx.number('enemy', `-${effects.damage}`, '#ff9a8a');
+        }
+        if (effects.heal) fx.number('heart', `+${effects.heal}`, '#7bd3a4');
+        if (effects.shield) fx.number('shield', `+${effects.shield}`, '#b69ae9');
+        if (effects.gold) fx.number('coin', `+${effects.gold}`, '#f3cb70');
         if (animation?.result.turn.effects.damage) audio.play('hit');
         if (animation?.result.turn.effects.shield) audio.play('shield');
         if (animation?.result.turn.effects.heal) audio.play('heal');
         if (animation?.result.turn.effects.gold) audio.play('gold');
       }
     }
-    if (phase.kind === 'enemy') audio.play('enemyAttack');
+    if (phase.kind === 'enemy') { audio.play('enemyAttack'); fx.attack(); }
   }
 
   function frame(time: number) {
     raf = 0;
+    fx.update(time - lastFrame);
+    lastFrame = time;
     if (animation) {
       const elapsed = time - animation.start;
       let offset = 0, index = 0;
@@ -77,7 +96,7 @@ export function startGame(canvas: HTMLCanvasElement) {
       }
     }
     render(time);
-    if (animation || time < invalidUntil) raf = requestAnimationFrame(frame);
+    if (animation || time < invalidUntil || !fx.idle) raf = requestAnimationFrame(frame);
   }
 
   function render(now = performance.now()) {
@@ -92,12 +111,15 @@ export function startGame(canvas: HTMLCanvasElement) {
         offset += item.duration;
       }
     }
+    ctx!.save();
+    if (!reduced && fx.shake) ctx!.translate(Math.sin(fx.shake * .09) * 6 * fx.shake / 250, 0);
     draw(ctx!, shape, {
       screen, run, board: phase?.board ?? run?.combat?.board, phase, progress,
       move: animation?.move, turn: animation?.result.turn, selected,
       shake: now < invalidUntil ? (invalidUntil - now) / 260 : 0,
-      muted: audio.isMuted(), reduced,
+      muted: audio.isMuted(), reduced, fx,
     }, GAME_CONTENT);
+    ctx!.restore();
   }
 
   function play(move: Move) {
@@ -106,18 +128,18 @@ export function startGame(canvas: HTMLCanvasElement) {
     selected = undefined;
     if (!result.turn.valid) {
       audio.play('invalid'); invalidUntil = performance.now() + 260;
-      if (!raf) raf = requestAnimationFrame(frame);
+      schedule();
       return;
     }
     animation = { result, phases: buildTimeline(run.combat!.board, result.turn), move, start: performance.now(), last: -1 };
-    if (!raf) raf = requestAnimationFrame(frame);
+    schedule();
   }
 
   function pickReward(index: number) {
     if (!run || screen !== 'reward' || animation) return;
     const next = chooseReward(run, index, GAME_CONTENT);
     if (next === run) return;
-    run = next; screen = run.status; selected = undefined;
+    run = next; screen = run.status; selected = undefined; fx.reset();
     audio.play('reward'); render();
   }
 
@@ -140,7 +162,7 @@ export function startGame(canvas: HTMLCanvasElement) {
     const p = point(event);
     if (screen === 'title' || screen === 'won' || screen === 'lost') {
       if (contains(shape.primary, p.x, p.y)) {
-        run = createRun(nextSeed, GAME_CONTENT); nextSeed = freshSeed(); screen = 'combat'; selected = undefined;
+        run = createRun(nextSeed, GAME_CONTENT); nextSeed = freshSeed(); screen = 'combat'; selected = undefined; fx.reset();
         audio.play('select'); render();
       }
     } else if (screen === 'reward' && run) {

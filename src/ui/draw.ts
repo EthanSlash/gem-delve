@@ -2,6 +2,7 @@ import { BOARD_SIZE } from '../types';
 import type { Board, GameContent, GemColor, Move, RewardOption, RunState, TurnResult } from '../types';
 import type { Layout, Phase, Rect } from './model';
 import { drawBackground, drawBoardCell, drawBoardFrame, drawEnemy, drawSelection, drawSprite } from './art';
+import type { Effects, FloatAnchor } from './fx';
 
 export interface View {
   screen: 'title' | 'combat' | 'reward' | 'won' | 'lost';
@@ -15,6 +16,7 @@ export interface View {
   shake?: number;
   muted: boolean;
   reduced: boolean;
+  fx: Effects;
 }
 
 const hues: Record<GemColor, string> = { red: '#e96a60', purple: '#b69ae9', green: '#7bd3a4', yellow: '#f3cb70' };
@@ -166,17 +168,21 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   box(ctx, { x: header.x - 5, y: header.y - 8, w: header.w + 10,
     h: shape.landscape ? 106 : 136 });
   box(ctx, { x: stats.x - 5, y: stats.y - 2, w: stats.w + 10, h: stats.h + 4 });
-  drawEnemy(ctx, enemy?.id ?? combat.enemy.id, shape.enemy, 0);
+  const recoil = view.reduced ? 0 : 5 * view.fx.flash / 200;
+  drawEnemy(ctx, enemy?.id ?? combat.enemy.id, { ...shape.enemy, x: shape.enemy.x + recoil }, view.fx.flash / 200);
   const narrow = shape.landscape && header.w < 180;
   text(ctx, `第 ${run.floor}／${content.enemies.length} 層`, header.x, header.y + 10, 15, '#f3cb70', 'left', 'bold');
   text(ctx, enemy?.name ?? '敵人', header.x + (shape.landscape && !narrow ? 64 : 0),
     header.y + (narrow ? 35 : 35), narrow ? 16 : 20, ink, 'left', 'bold');
   const resolved = view.phase?.kind === 'finish' || (view.phase?.kind === 'enemy' && view.progress > .5);
-  const enemyHp = resolved ? view.turn!.state.enemy.hp : combat.enemy.hp;
+  const applied = !!view.turn && !!view.phase && view.phase.kind !== 'swap';
+  const enemyHp = applied ? view.turn!.state.enemy.hp : combat.enemy.hp;
   const bar: Rect = { x: header.x + (shape.landscape && !narrow ? 64 : 0), y: header.y + 57,
     w: header.w - (shape.landscape && !narrow ? 68 : narrow ? shape.enemy.w + 5 : 86), h: 12 };
   box(ctx, bar, '#231c2a', '#7e5956', 4);
   const fill = Math.max(0, bar.w - 4) * Math.max(0, enemyHp) / (enemy?.maxHp || 1);
+  const trailing = Math.max(0, bar.w - 4) * Math.min(1, Math.max(0, view.fx.trail) / (enemy?.maxHp || 1));
+  ctx.fillStyle = '#ffd4bd'; ctx.fillRect(bar.x + 2, bar.y + 2, trailing, bar.h - 4);
   ctx.fillStyle = '#ad3549'; ctx.fillRect(bar.x + 2, bar.y + 2, fill, bar.h - 4);
   ctx.fillStyle = '#f58383'; ctx.fillRect(bar.x + 2, bar.y + 2, fill, 2);
   const countdown = resolved ? view.turn!.state.enemy.countdown : combat.enemy.countdown;
@@ -186,14 +192,20 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   text(ctx, narrow ? `${countdown}` : `${Math.max(0, enemyHp)}/${enemy?.maxHp ?? 0}  ${countdown} 步`, badge.x + 27, badge.y + 11, 14, '#f3d3b9');
   button(ctx, shape.mute, false);
   text(ctx, view.muted ? '靜音' : '音效', shape.mute.x + 24, shape.mute.y + 20, 14, ink, 'center');
-  const player = resolved ? view.turn!.state.player : combat.player;
-  const shield = resolved ? view.turn!.state.shield : combat.shield;
+  const player = resolved ? view.turn!.state.player : applied ? { ...combat.player,
+    hp: Math.min(combat.player.maxHp, combat.player.hp + view.turn!.effects.heal),
+    gold: combat.player.gold + view.turn!.effects.gold } : combat.player;
+  const shield = resolved ? view.turn!.state.shield : combat.shield + (applied ? view.turn!.effects.shield : 0);
   const statSize = Math.max(14, Math.min(17, stats.w * .048));
   const statItems: [string, 'heart' | 'shield' | 'coin'][] = [[`${player.hp}/${player.maxHp}`, 'heart'], [`${shield}`, 'shield'], [`${player.gold}`, 'coin']];
   let sx = stats.x;
+  const anchors: Partial<Record<FloatAnchor, { x: number; y: number }>> = {
+    enemy: { x: shape.enemy.x + shape.enemy.w / 2, y: shape.enemy.y + shape.enemy.h / 2 },
+  };
   for (const [i, [value, kind]] of statItems.entries()) {
     if (narrow && i === 1) sx = stats.x;
     const sy = stats.y + (narrow && i > 0 ? 41 : 17);
+    anchors[kind] = { x: sx + 9, y: sy };
     icon(ctx, kind, sx + 9, sy, 17);
     text(ctx, value, sx + 22, sy, statSize, ink, 'left', 'bold');
     ctx.font = `bold ${statSize}px system-ui, sans-serif`;
@@ -202,6 +214,13 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   const relics = player.relics.map(id => content.relics.find(r => r.id === id)?.name ?? id).join('、');
   text(ctx, `遺物：${relics || '無'}`, stats.x, stats.y + (narrow ? 68 : 40), Math.max(14, Math.min(16, stats.w * .042)), '#d5bc9c');
   board(ctx, shape, view.phase?.kind === 'enemy' && view.progress > .5 ? view.turn!.state.board : view.board ?? combat.board, view);
+  for (const p of view.fx.particles) {
+    ctx.globalAlpha = Math.max(0, 1 - p.age / p.life);
+    ctx.fillStyle = hues[p.color]; ctx.beginPath();
+    ctx.moveTo(p.x, p.y - p.size); ctx.lineTo(p.x + p.size * .7, p.y);
+    ctx.lineTo(p.x, p.y + p.size); ctx.lineTo(p.x - p.size * .7, p.y); ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
   const legend = shape.legend;
   const items: [GemColor, string][] = [['red', '紅攻擊'], ['purple', '紫護盾'], ['green', '綠回血'], ['yellow', '黃金幣']];
   for (let i = 0; i < 4; i++) {
@@ -212,14 +231,10 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   }
   if (view.phase && view.turn) {
     const phase = view.phase;
-    if (phase.chain && phase.chain >= 2) text(ctx, `${phase.chain} 連鎖！`, shape.board.x + shape.board.w / 2, shape.board.y + shape.board.h / 2,
-      28, '#ffe4a1', 'center', 'bold');
-    if ((phase.kind === 'clear' || phase.kind === 'fall') && phase.chain === 1) {
-      const e = view.turn.effects;
-      const floats: [number, string, string][] = [[e.damage, '傷害', '#e96a60'], [e.shield, '護盾', '#b69ae9'],
-        [e.heal, '回血', '#7bd3a4'], [e.gold, '金幣', '#f3cb70']];
-      floats.filter(v => v[0] > 0).forEach((v, i) => text(ctx, `+${v[0]} ${v[1]}`, shape.board.x + shape.board.w / 2,
-        shape.board.y + shape.board.h * .27 + i * 28 - (view.reduced ? 0 : view.progress * 8), 20, v[2], 'center', 'bold'));
+    if (phase.chain && phase.chain >= 2) {
+      const pop = view.reduced || phase.kind !== 'clear' ? 1 : Math.min(1, .65 + view.progress * 2) + .16 * Math.sin(Math.min(1, view.progress * 2) * Math.PI);
+      text(ctx, `${phase.chain} 連鎖！`, shape.board.x + shape.board.w / 2, shape.board.y + shape.board.h / 2,
+        Math.min(40, 28 + (phase.chain - 2) * 2) * pop, '#ffe4a1', 'center', 'bold');
     }
     if (phase.kind === 'enemy') {
       ctx.fillStyle = `rgba(233,106,96,${.26 * (1 - view.progress)})`; ctx.fillRect(0, 0, w, h);
@@ -231,4 +246,11 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
     if (phase.kind === 'finish' && phase.reshuffled)
       text(ctx, '重新洗牌', shape.board.x + shape.board.w / 2, shape.board.y + shape.board.h / 2, 26, '#ffe4a1', 'center', 'bold');
   }
+  for (const number of view.fx.numbers) {
+    const anchor = anchors[number.anchor];
+    if (!anchor) continue;
+    ctx.globalAlpha = Math.min(1, (650 - number.age) / 150);
+    text(ctx, number.value, anchor.x, anchor.y - (view.reduced ? 16 : 16 + number.age * .055), 20, number.color, 'center', 'bold');
+  }
+  ctx.globalAlpha = 1;
 }

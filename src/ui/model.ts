@@ -1,5 +1,5 @@
 import { BOARD_SIZE } from '../types';
-import type { Board, Move, Pos, TurnResult } from '../types';
+import type { Board, MatchGroup, Move, Pos, TurnResult } from '../types';
 
 export interface Rect { x: number; y: number; w: number; h: number }
 export interface Layout {
@@ -67,7 +67,7 @@ export function dragMove(a: Pos, dx: number, dy: number, threshold: number): Mov
 }
 
 export type PhaseKind = 'swap' | 'clear' | 'fall' | 'enemy' | 'finish';
-export interface Phase { kind: PhaseKind; board: Board; duration: number; chain?: number; reshuffled?: boolean; dropRows?: number[][] }
+export interface Phase { kind: PhaseKind; board: Board; duration: number; chain?: number; groups?: MatchGroup[]; reshuffled?: boolean; dropRows?: number[][] }
 
 // Gravity preserves the order of the surviving cells in each column. New cells
 // enter as a stack immediately above the board, one row per cleared space.
@@ -95,7 +95,7 @@ export function buildTimeline(initial: Board, result: TurnResult): Phase[] {
   if (!result.valid) return [];
   const phases: Phase[] = [{ kind: 'swap', board: initial, duration: 135 }];
   for (const step of result.steps) {
-    phases.push({ kind: 'clear', board: step.boardAfterClear, duration: 160, chain: step.chain });
+    phases.push({ kind: 'clear', board: step.boardAfterClear, duration: 160, chain: step.chain, groups: step.groups });
     phases.push({ kind: 'fall', board: step.boardAfter, duration: 175, chain: step.chain,
       dropRows: fallDistances(step.boardAfterClear) });
   }
