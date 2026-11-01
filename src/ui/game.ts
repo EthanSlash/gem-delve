@@ -162,14 +162,18 @@ export function startGame(canvas: HTMLCanvasElement) {
   }
 
   canvas.addEventListener('pointerdown', event => {
+    if (press && press.id !== event.pointerId) return;
     if (animation || performance.now() < invalidUntil) return;
     const p = point(event);
     const pos = screen === 'combat' ? hitCell(shape, p.x, p.y) : null;
     press = pos ? { pos, x: p.x, y: p.y, id: event.pointerId } : null;
     if (pos) canvas.setPointerCapture(event.pointerId);
   });
-  canvas.addEventListener('pointercancel', () => { press = null; });
+  canvas.addEventListener('pointercancel', event => {
+    if (press?.id === event.pointerId) press = null;
+  });
   canvas.addEventListener('pointerup', event => {
+    if (press && press.id !== event.pointerId) return;
     if (!unlocked) { unlocked = true; audio.unlock(); }
     if (animation || performance.now() < invalidUntil) { press = null; return; }
     const p = point(event);

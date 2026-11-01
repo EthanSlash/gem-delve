@@ -5,7 +5,8 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "noEmit": true
+    "noEmit": true,
+    "skipLibCheck": true
   },
-  "include": ["src", "sim", "tests"]
+  "include": ["src", "sim", "tests", "vite.config.ts"]
 }

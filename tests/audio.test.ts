@@ -203,6 +203,21 @@ describe('audio', () => {
     expect(FakeAudioContext.instances).toHaveLength(1);
   });
 
+  it('resumes an interrupted context on both play and unlock', () => {
+    installFake();
+    const audio = createAudio();
+    audio.play('select');
+    const context = FakeAudioContext.instances[0]!;
+    context.state = 'interrupted';
+    audio.play('match');
+    expect(context.resumed).toBe(2);
+    context.state = 'interrupted';
+    audio.unlock();
+    expect(context.resumed).toBe(3);
+    audio.play('select');
+    expect(context.resumed).toBe(3);
+  });
+
   it('safely ignores unlock when Web Audio is unavailable', () => {
     expect(() => createAudio().unlock()).not.toThrow();
   });

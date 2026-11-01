@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import manifestSource from '../public/manifest.webmanifest?raw';
 import swSource from '../public/sw.js?raw';
+import { stampServiceWorker } from '../vite.config';
 
 interface ManifestIcon {
   src: string;
@@ -86,14 +87,19 @@ describe('service worker', () => {
     expect(swSource).toContain('location.origin');
   });
 
-  it('never caches non-OK responses', () => {
-    expect(swSource).toMatch(/response\.ok/);
-    expect(swSource).not.toMatch(/cache\.put\((?![^)]*ok)[^)]*response/);
+  it('fetches every install resource with reload and checks it before writing', () => {
+    const installSource = swSource.split("addEventListener('install'")[1]!.split("addEventListener('activate'")[0]!;
+    expect(installSource).toContain("fetch('./', { cache: 'reload' })");
+    expect(installSource).toContain("fetch(url, { cache: 'reload' })");
+    expect(installSource.indexOf('Promise.all')).toBeLessThan(installSource.indexOf("cache.put('./'"));
+    expect(installSource).toMatch(/pageResponse\.ok/);
+    expect(installSource).toMatch(/response\.ok/);
+    expect(installSource).toContain('caches.delete(CACHE_VERSION)');
   });
 
-  it('uses a versioned cache name', () => {
-    expect(swSource).toMatch(/CACHE_VERSION/);
-    expect(swSource).toMatch(/-v\d+/);
+  it('uses a build-stamped cache name and deletes only older game caches', () => {
+    expect(swSource).toContain("const CACHE_VERSION = 'gem-delve-__BUILD_ID__'");
+    expect(swSource).toContain("key.startsWith('gem-delve-') && key !== CACHE_VERSION");
   });
 
   it('precaches hashed assets scripts referenced on the page during install', () => {
@@ -106,11 +112,33 @@ describe('service worker', () => {
     expect(swSource).toMatch(/new URL\(/);
     expect(installSource).toContain('collectAssetUrls');
     expect(installSource).toMatch(/pageResponse\.ok/);
-    expect(installSource).toMatch(/assetResponse\.ok/);
+    expect(installSource).toContain('...PRECACHE_URLS');
+  });
+
+  it('uses network-first navigation and cache-first assets without runtime writes', () => {
+    const fetchSource = swSource.split("addEventListener('fetch'")[1]!;
+    expect(fetchSource).toContain('fetch(request)');
+    expect(fetchSource).toContain("caches.match('./', { ignoreVary: true })");
+    expect(fetchSource).toContain('caches.match(request, { ignoreVary: true })');
+    expect(fetchSource).not.toContain('cache.put');
+    expect(fetchSource).not.toContain('caches.open');
   });
 
   it('contains no absolute "/" URLs', () => {
     expect(swSource).not.toMatch(/https?:\/\//);
     expect(swSource).not.toMatch(/['"`]\/(?!\/)/);
+  });
+});
+
+describe('service worker build stamp', () => {
+  it('replaces the placeholder deterministically and changes with assets or HTML', () => {
+    const source = "const CACHE_VERSION = 'gem-delve-__BUILD_ID__';";
+    const stamped = stampServiceWorker(source, ['b.js', 'a.css'], '<html>one</html>');
+    expect(stamped).toMatch(/gem-delve-[0-9a-f]{12}/);
+    expect(stamped).not.toContain('__BUILD_ID__');
+    expect(stamped).toBe(stampServiceWorker(source, ['a.css', 'b.js'], '<html>one</html>'));
+    expect(stamped).not.toBe(stampServiceWorker(source, ['b.js', 'c.css'], '<html>one</html>'));
+    expect(stamped).not.toBe(stampServiceWorker(source, ['b.js', 'a.css'], '<html>two</html>'));
+    expect(source).toContain('__BUILD_ID__');
   });
 });

@@ -240,7 +240,7 @@ function playSound(context: AudioContextLike, event: SoundEvent, level?: number)
 }
 
 function resume(context: AudioContextLike): void {
-  if (context.state !== 'suspended' || !context.resume) return;
+  if (context.state === 'running' || !context.resume) return;
   try {
     const pending = context.resume();
     if (typeof pending === 'object' && pending !== null) {

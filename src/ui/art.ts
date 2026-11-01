@@ -16,7 +16,16 @@ export function cacheKey(kind: string, width: number, height: number, dpr: numbe
   return `${kind}:${Math.max(1, Math.round(width * dpr))}x${Math.max(1, Math.round(height * dpr))}@${width}x${height}:${dpr}`;
 }
 
-const sprites = new Map<string, HTMLCanvasElement>();
+// Each sprite type retains its two most recently used size/DPR variants.
+export function keepRecentSizes<T>(cache: Map<string, T>, key: string, value: T): Map<string, T> {
+  const next = new Map(cache);
+  next.delete(key);
+  next.set(key, value);
+  if (next.size > 2) next.delete(next.keys().next().value!);
+  return next;
+}
+
+const sprites = new Map<string, Map<string, HTMLCanvasElement>>();
 const backgrounds = new Map<string, HTMLCanvasElement>();
 
 function scale(ctx: CanvasRenderingContext2D): number {
@@ -32,6 +41,15 @@ function raster(width: number, height: number, dpr: number, paint: (ctx: CanvasR
   ctx.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
   paint(ctx);
   return canvas;
+}
+
+function cachedSprite(kind: string, width: number, height: number, dpr: number,
+  paint: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
+  const key = cacheKey(kind, width, height, dpr);
+  const variants = sprites.get(kind) ?? new Map<string, HTMLCanvasElement>();
+  const image = variants.get(key) ?? raster(width, height, dpr, paint);
+  sprites.set(kind, keepRecentSizes(variants, key, image));
+  return image;
 }
 
 function polygon(ctx: CanvasRenderingContext2D, points: Point[]) {
@@ -134,15 +152,10 @@ function rock(ctx: CanvasRenderingContext2D, size: number) {
 export function drawSprite(ctx: CanvasRenderingContext2D, cell: Cell, x: number, y: number, size: number) {
   const kind = cell.kind === 'junk' ? 'junk' : cell.color;
   const dpr = scale(ctx);
-  const key = cacheKey(kind, size, size, dpr);
-  let sprite = sprites.get(key);
-  if (!sprite) {
-    sprite = raster(size, size, dpr, surface => {
-      if (cell.kind === 'junk') rock(surface, size);
-      else jewel(surface, cell.color, size);
-    });
-    sprites.set(key, sprite);
-  }
+  const sprite = cachedSprite(kind, size, size, dpr, surface => {
+    if (cell.kind === 'junk') rock(surface, size);
+    else jewel(surface, cell.color, size);
+  });
   ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
 }
 
@@ -210,30 +223,20 @@ function creature(ctx: CanvasRenderingContext2D, id: string) {
 
 export function drawEnemy(ctx: CanvasRenderingContext2D, id: string, rect: Rect, flash: number) {
   const dpr = scale(ctx);
-  const key = cacheKey(`enemy:${id}`, rect.w, rect.h, dpr);
-  let sprite = sprites.get(key);
-  if (!sprite) {
-    sprite = raster(rect.w, rect.h, dpr, surface => {
-      surface.scale(rect.w / 100, rect.h / 100);
-      creature(surface, id);
-    });
-    sprites.set(key, sprite);
-  }
+  const sprite = cachedSprite(`enemy:${id}`, rect.w, rect.h, dpr, surface => {
+    surface.scale(rect.w / 100, rect.h / 100);
+    creature(surface, id);
+  });
   ctx.drawImage(sprite, rect.x, rect.y, rect.w, rect.h);
   if (flash > 0) {
     ctx.save(); ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = Math.min(1, Math.max(0, flash));
     // Tint only opaque creature pixels, leaving the sprite's transparent margin untouched.
-    const tintedKey = `${key}:white`;
-    let tinted = sprites.get(tintedKey);
-    if (!tinted) {
-      tinted = raster(rect.w, rect.h, dpr, surface => {
-        surface.drawImage(sprite!, 0, 0, rect.w, rect.h);
-        surface.globalCompositeOperation = 'source-in';
-        surface.fillStyle = '#fff'; surface.fillRect(0, 0, rect.w, rect.h);
-      });
-      sprites.set(tintedKey, tinted);
-    }
+    const tinted = cachedSprite(`enemy:${id}:white`, rect.w, rect.h, dpr, surface => {
+      surface.drawImage(sprite, 0, 0, rect.w, rect.h);
+      surface.globalCompositeOperation = 'source-in';
+      surface.fillStyle = '#fff'; surface.fillRect(0, 0, rect.w, rect.h);
+    });
     ctx.drawImage(tinted, rect.x, rect.y, rect.w, rect.h);
     ctx.restore();
   }
