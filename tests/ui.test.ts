@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { buildTimeline, dragMove, fallDistances, hitCell, layout, neighboringMove, sameBoard } from '../src/ui/model';
+import type { Rect } from '../src/ui/model';
 import type { Board, TurnResult } from '../src/types';
 
 describe('canvas geometry and input', () => {
+  it('keeps enemy art on canvas and clear of the board, stats, and mute control', () => {
+    const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && a.x + a.w > b.x &&
+      a.y < b.y + b.h && a.y + a.h > b.y;
+    for (const [width, height] of [[320,320],[360,640],[375,812],[480,400],
+      [640,360],[844,390],[800,600],[1024,768]]) {
+      const { enemy, board, stats, mute } = layout(width!, height!);
+      expect(enemy.x).toBeGreaterThanOrEqual(0);
+      expect(enemy.y).toBeGreaterThanOrEqual(0);
+      expect(enemy.x + enemy.w).toBeLessThanOrEqual(width!);
+      expect(enemy.y + enemy.h).toBeLessThanOrEqual(height!);
+      for (const other of [board, stats, mute]) expect(overlaps(enemy, other)).toBe(false);
+    }
+  });
   it('hits only cells inside the board at phone and desktop sizes', () => {
     for (const [w, h] of [[360, 640], [900, 450], [1300, 900]]) {
       const shape = layout(w!, h!);

@@ -4,7 +4,7 @@ import type { Board, Move, Pos, TurnResult } from '../types';
 export interface Rect { x: number; y: number; w: number; h: number }
 export interface Layout {
   width: number; height: number; landscape: boolean;
-  board: Rect; cell: number; header: Rect; stats: Rect; legend: Rect;
+  board: Rect; cell: number; header: Rect; enemy: Rect; stats: Rect; legend: Rect;
   mute: Rect; cards: Rect[]; reroll: Rect; primary: Rect;
 }
 
@@ -14,14 +14,17 @@ export function layout(width: number, height: number, rewardCount = 3): Layout {
   const sideX = landscape ? Math.min(height - pad * 2, width * 0.56) + pad * 2 : pad;
   const sideW = landscape ? width - sideX - pad : width - 2 * pad;
   const size = landscape
-    ? Math.min(height - pad * 2, width * 0.55)
+    ? Math.min(height - pad * 2, width * 0.55, width - pad * 2 - 116)
     : Math.min(width - pad * 2, Math.max(180, height - 285));
   const board: Rect = { x: landscape ? pad + (sideX - 2 * pad - size) / 2 : (width - size) / 2,
     y: landscape ? (height - size) / 2 : Math.max(193, Math.min(height - size - 57, height * 0.33)), w: size, h: size };
   const header: Rect = landscape ? { x: sideX, y: pad + 5, w: sideW, h: 92 }
     : { x: pad, y: 15, w: sideW, h: 92 };
+  const enemySize = landscape ? Math.min(56, Math.max(50, sideW - 54)) : 78;
+  const enemy: Rect = landscape ? { x: sideW < 180 ? width - pad - enemySize : sideX, y: pad + 47, w: enemySize, h: enemySize }
+    : { x: width - pad - enemySize, y: 63, w: enemySize, h: enemySize };
   const stats: Rect = landscape ? { x: sideX, y: pad + 104, w: sideW, h: 90 }
-    : { x: pad, y: 109, w: sideW, h: 70 };
+    : { x: pad, y: 146, w: sideW, h: 52 };
   const legend: Rect = landscape ? { x: sideX, y: stats.y + stats.h + 12, w: sideW, h: 58 }
     : { x: pad, y: board.y + size + 10, w: sideW, h: 52 };
   const mute: Rect = { x: width - pad - 48, y: 17, w: 48, h: 40 };
@@ -39,7 +42,7 @@ export function layout(width: number, height: number, rewardCount = 3): Layout {
     y: landscape ? Math.min(height - 68, cardTop + cardH + 24) : Math.min(height - 68, cardTop + count * (cardH + gap) + 8),
     w: landscape ? Math.min(320, width - 2 * pad) : cardW, h: 46 };
   const primary: Rect = { x: (width - Math.min(280, width - 2 * pad)) / 2, y: Math.min(height - 96, height * 0.69), w: Math.min(280, width - 2 * pad), h: 58 };
-  return { width, height, landscape, board, cell: size / BOARD_SIZE, header, stats, legend, mute, cards, reroll, primary };
+  return { width, height, landscape, board, cell: size / BOARD_SIZE, header, enemy, stats, legend, mute, cards, reroll, primary };
 }
 
 export function contains(rect: Rect, x: number, y: number): boolean {

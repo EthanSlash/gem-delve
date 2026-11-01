@@ -1,0 +1,298 @@
+import type { Cell, GemColor } from '../types';
+import type { Rect } from './model';
+
+type Point = [number, number];
+type Palette = { light: string; mid: string; dark: string; deep: string; accent?: string };
+
+const palettes: Record<GemColor, Palette> = {
+  red: { light: '#ff9a8a', mid: '#f0504a', dark: '#c22436', deep: '#8e1428' },
+  purple: { light: '#dcc8ff', mid: '#a06cf0', dark: '#6d3ccc', deep: '#4b287e', accent: '#b48cf6' },
+  green: { light: '#b4f5cc', mid: '#4fd08a', dark: '#1f9a62', deep: '#127048' },
+  yellow: { light: '#fff0a8', mid: '#f7c23c', dark: '#d98a14', deep: '#955018' },
+};
+
+// A key includes the actual raster dimensions, not only the CSS dimensions.
+export function cacheKey(kind: string, width: number, height: number, dpr: number): string {
+  return `${kind}:${Math.max(1, Math.round(width * dpr))}x${Math.max(1, Math.round(height * dpr))}@${width}x${height}:${dpr}`;
+}
+
+const sprites = new Map<string, HTMLCanvasElement>();
+const backgrounds = new Map<string, HTMLCanvasElement>();
+
+function scale(ctx: CanvasRenderingContext2D): number {
+  const transform = ctx.getTransform();
+  return Math.max(1, Math.hypot(transform.a, transform.b), Math.hypot(transform.c, transform.d));
+}
+
+function raster(width: number, height: number, dpr: number, paint: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * dpr));
+  canvas.height = Math.max(1, Math.round(height * dpr));
+  const ctx = canvas.getContext('2d')!;
+  ctx.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
+  paint(ctx);
+  return canvas;
+}
+
+function polygon(ctx: CanvasRenderingContext2D, points: Point[]) {
+  ctx.beginPath();
+  ctx.moveTo(points[0]![0], points[0]![1]);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i]![0], points[i]![1]);
+  ctx.closePath();
+}
+
+function outline(color: GemColor, r: number): Point[] {
+  if (color === 'red') return [[-r * .68, -r], [r * .68, -r], [r, -r * .68], [r, r * .68],
+    [r * .68, r], [-r * .68, r], [-r, r * .68], [-r, -r * .68]];
+  if (color === 'purple') return [[0, -r * 1.2], [r, 0], [0, r * 1.2], [-r, 0]];
+  if (color === 'yellow') return [[0, -r * 1.17], [r * 1.1, r * .9], [-r * 1.1, r * .9]];
+  return Array.from({ length: 12 }, (_, i): Point => {
+    const a = (i / 12 - .25) * Math.PI * 2;
+    const radius = r * (i % 2 ? .965 : 1);
+    return [Math.cos(a) * radius, Math.sin(a) * radius];
+  });
+}
+
+function jewel(ctx: CanvasRenderingContext2D, color: GemColor, size: number) {
+  const r = size * .31;
+  const outer = outline(color, r);
+  const inner = outer.map(([x, y]): Point => [x * .56, y * .56]);
+  const palette = palettes[color];
+  ctx.translate(size / 2, size / 2);
+  polygon(ctx, outer);
+  ctx.fillStyle = palette.deep;
+  ctx.fill();
+  ctx.strokeStyle = '#100d1c';
+  ctx.lineWidth = Math.max(.7, size * .022);
+  ctx.stroke();
+
+  for (let i = 0; i < outer.length; i++) {
+    const next = (i + 1) % outer.length;
+    polygon(ctx, [outer[i]!, outer[next]!, inner[next]!, inner[i]!]);
+    const y = (outer[i]![1] + outer[next]![1]) / 2;
+    const x = (outer[i]![0] + outer[next]![0]) / 2;
+    ctx.fillStyle = y < -r * .3 ? (x < 0 ? palette.light : (palette.accent ?? palette.mid))
+      : y > r * .25 ? palette.deep : (x < 0 ? palette.mid : palette.dark);
+    ctx.fill();
+  }
+
+  const table = ctx.createLinearGradient(-r * .5, -r * .6, r * .55, r * .65);
+  table.addColorStop(0, palette.light);
+  table.addColorStop(.46, palette.mid);
+  table.addColorStop(1, palette.dark);
+  polygon(ctx, inner);
+  ctx.fillStyle = table;
+  ctx.fill();
+  ctx.strokeStyle = palette.deep;
+  ctx.lineWidth = Math.max(.5, size * .012);
+  ctx.stroke();
+
+  // A single hard-edged reflection follows the upper left cut rather than a blurry dot.
+  polygon(ctx, [[-r * .49, -r * .41], [-r * .18, -r * .68], [r * .05, -r * .57], [-r * .2, -r * .35]]);
+  ctx.fillStyle = 'rgba(255,255,255,.92)';
+  ctx.fill();
+  polygon(ctx, [[r * .16, r * .39], [r * .47, r * .19], [r * .35, r * .49]]);
+  ctx.fillStyle = 'rgba(255,255,255,.22)';
+  ctx.fill();
+}
+
+function rock(ctx: CanvasRenderingContext2D, size: number) {
+  const r = size * .32;
+  ctx.translate(size / 2, size / 2);
+  const edge: Point[] = [[-1.02, -.53], [-.72, -.96], [-.16, -.87], [.16, -1.08], [.79, -.77],
+    [1.02, -.29], [.81, .17], [.96, .69], [.36, .93], [-.23, .83], [-.78, .94], [-1.06, .3]]
+    .map(([x, y]): Point => [x! * r, y! * r]);
+  polygon(ctx, edge);
+  ctx.fillStyle = '#40434d'; ctx.fill();
+  ctx.strokeStyle = '#181a23'; ctx.lineWidth = Math.max(.8, size * .025); ctx.stroke();
+  polygon(ctx, [edge[0]!, edge[1]!, edge[2]!, [-r * .45, -r * .2], [-r * .72, r * .22]]);
+  ctx.fillStyle = '#777b83'; ctx.fill();
+  polygon(ctx, [edge[2]!, edge[3]!, edge[4]!, [r * .42, -r * .13], [-r * .45, -r * .2]]);
+  ctx.fillStyle = '#5c606b'; ctx.fill();
+  polygon(ctx, [edge[5]!, edge[6]!, edge[7]!, edge[8]!, [r * .38, r * .38]]);
+  ctx.fillStyle = '#292d37'; ctx.fill();
+  polygon(ctx, [edge[9]!, edge[10]!, edge[11]!, [-r * .72, r * .22], [-r * .24, r * .48]]);
+  ctx.fillStyle = '#343842'; ctx.fill();
+
+  // Skull and jaw are drawn as shapes, including eye sockets, nose and teeth.
+  ctx.beginPath();
+  ctx.moveTo(-r * .35, r * .19);
+  ctx.bezierCurveTo(-r * .65, -r * .15, -r * .4, -r * .48, 0, -r * .49);
+  ctx.bezierCurveTo(r * .47, -r * .48, r * .63, -r * .1, r * .35, r * .19);
+  ctx.lineTo(r * .25, r * .46); ctx.lineTo(-r * .25, r * .46); ctx.closePath();
+  ctx.fillStyle = '#c2c1bd'; ctx.fill();
+  ctx.fillStyle = '#282a32';
+  ctx.beginPath(); ctx.ellipse(-r * .21, -r * .02, r * .15, r * .18, -.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(r * .21, -r * .02, r * .15, r * .18, .2, 0, Math.PI * 2); ctx.fill();
+  polygon(ctx, [[0, r * .09], [-r * .085, r * .22], [r * .085, r * .22]]); ctx.fill();
+  ctx.strokeStyle = '#51535b'; ctx.lineWidth = Math.max(.55, size * .014);
+  for (const x of [-.12, 0, .12]) {
+    ctx.beginPath(); ctx.moveTo(r * x, r * .3); ctx.lineTo(r * x, r * .46); ctx.stroke();
+  }
+}
+
+export function drawSprite(ctx: CanvasRenderingContext2D, cell: Cell, x: number, y: number, size: number) {
+  const kind = cell.kind === 'junk' ? 'junk' : cell.color;
+  const dpr = scale(ctx);
+  const key = cacheKey(kind, size, size, dpr);
+  let sprite = sprites.get(key);
+  if (!sprite) {
+    sprite = raster(size, size, dpr, surface => {
+      if (cell.kind === 'junk') rock(surface, size);
+      else jewel(surface, cell.color, size);
+    });
+    sprites.set(key, sprite);
+  }
+  ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
+}
+
+function shape(ctx: CanvasRenderingContext2D, points: Point[], fill: string, stroke = '#171322') {
+  polygon(ctx, points); ctx.fillStyle = fill; ctx.fill();
+  ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke();
+}
+
+function eye(ctx: CanvasRenderingContext2D, x: number, y: number, radius = 3) {
+  ctx.beginPath(); ctx.ellipse(x, y, radius, radius * 1.3, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#fff2cb'; ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 1, y + 1, radius * .48, 0, Math.PI * 2);
+  ctx.fillStyle = '#281a35'; ctx.fill();
+}
+
+function creature(ctx: CanvasRenderingContext2D, id: string) {
+  ctx.lineJoin = 'round';
+  if (id === 'caveBat') {
+    shape(ctx, [[48,42],[32,23],[21,31],[5,20],[9,52],[22,45],[34,57],[48,52]], '#514072');
+    shape(ctx, [[52,42],[68,23],[79,31],[95,20],[91,52],[78,45],[66,57],[52,52]], '#514072');
+    shape(ctx, [[18,34],[35,39],[45,49],[31,46]], '#7d639a');
+    shape(ctx, [[82,34],[65,39],[55,49],[69,46]], '#7d639a');
+    shape(ctx, [[37,43],[34,23],[45,32],[50,37],[55,32],[66,23],[63,43],[60,66],[50,73],[40,66]], '#32283e');
+    eye(ctx, 43, 48); eye(ctx, 57, 48);
+    shape(ctx, [[46,61],[49,69],[51,61]], '#e9d9b9'); shape(ctx, [[53,61],[56,69],[58,61]], '#e9d9b9');
+  } else if (id === 'skeleton') {
+    shape(ctx, [[22,80],[31,49],[39,50],[50,61],[61,50],[70,49],[78,80],[64,78],[59,70],[41,70],[36,78]], '#696079');
+    shape(ctx, [[38,57],[42,75],[58,75],[62,57],[50,60]], '#c6baa8');
+    for (const y of [63,69]) { shape(ctx, [[40,y],[50,y+2],[60,y]], '#918b89'); }
+    shape(ctx, [[29,25],[35,13],[65,13],[71,25],[68,48],[60,55],[40,55],[32,48]], '#d3c6ad');
+    shape(ctx, [[33,25],[48,19],[64,23],[67,30],[36,31]], '#f1debf');
+    shape(ctx, [[36,35],[45,33],[46,42],[39,44]], '#302538');
+    shape(ctx, [[54,33],[64,35],[61,44],[54,42]], '#302538');
+    shape(ctx, [[50,42],[46,49],[54,49]], '#493648');
+    for (const x of [41,47,53,59]) shape(ctx, [[x,50],[x+3,50],[x+3,56],[x,56]], '#eee0c5');
+  } else if (id === 'gargoyle') {
+    shape(ctx, [[38,54],[5,25],[13,69],[32,73],[42,67]], '#595568');
+    shape(ctx, [[62,54],[95,25],[87,69],[68,73],[58,67]], '#595568');
+    shape(ctx, [[13,39],[36,60],[25,57]], '#858192');
+    shape(ctx, [[87,39],[64,60],[75,57]], '#858192');
+    shape(ctx, [[24,71],[28,44],[38,32],[32,12],[45,26],[55,26],[68,12],[62,32],[72,44],[76,71],[63,82],[37,82]], '#666270');
+    shape(ctx, [[31,49],[44,36],[56,36],[69,49],[60,65],[50,59],[40,65]], '#938b91');
+    shape(ctx, [[42,70],[50,65],[58,70],[65,80],[35,80]], '#464351');
+    eye(ctx, 41, 48, 4); eye(ctx, 59, 48, 4);
+    shape(ctx, [[47,59],[50,65],[53,59]], '#38303d');
+  } else {
+    const king = id === 'slimeKing';
+    if (king) {
+      shape(ctx, [[26,37],[21,10],[37,22],[50,5],[63,22],[79,10],[74,37]], '#bd8241', '#4b2a2a');
+      shape(ctx, [[30,31],[70,31],[72,39],[28,39]], '#f0c377', '#6f482a');
+      shape(ctx, [[45,26],[50,17],[55,26],[50,33]], '#bd4e69');
+    }
+    ctx.beginPath();
+    ctx.moveTo(12,75); ctx.bezierCurveTo(6,56,19,35,37,34);
+    ctx.bezierCurveTo(52,king ? 27 : 24,76,34,85,56);
+    ctx.quadraticCurveTo(94,79,83,83); ctx.quadraticCurveTo(50,92,17,83); ctx.closePath();
+    ctx.fillStyle = king ? '#7c49ab' : '#4aa88f'; ctx.fill();
+    ctx.strokeStyle = '#201d31'; ctx.lineWidth = 3; ctx.stroke();
+    shape(ctx, [[19,62],[29,43],[48,37],[40,64],[22,74]], king ? '#aa76ca' : '#8addb7', 'transparent');
+    shape(ctx, [[65,40],[82,58],[85,76],[69,78],[76,60]], king ? '#513c83' : '#32766d', 'transparent');
+    eye(ctx, 39, 61, king ? 5 : 4); eye(ctx, 62, 61, king ? 5 : 4);
+    ctx.beginPath(); ctx.arc(51, 70, 5, 0, Math.PI); ctx.strokeStyle = '#30243c'; ctx.lineWidth = 2; ctx.stroke();
+  }
+}
+
+export function drawEnemy(ctx: CanvasRenderingContext2D, id: string, rect: Rect, flash: number) {
+  const dpr = scale(ctx);
+  const key = cacheKey(`enemy:${id}`, rect.w, rect.h, dpr);
+  let sprite = sprites.get(key);
+  if (!sprite) {
+    sprite = raster(rect.w, rect.h, dpr, surface => {
+      surface.scale(rect.w / 100, rect.h / 100);
+      creature(surface, id);
+    });
+    sprites.set(key, sprite);
+  }
+  ctx.drawImage(sprite, rect.x, rect.y, rect.w, rect.h);
+  if (flash > 0) {
+    ctx.save(); ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = Math.min(1, Math.max(0, flash));
+    // Tint only opaque creature pixels, leaving the sprite's transparent margin untouched.
+    const tintedKey = `${key}:white`;
+    let tinted = sprites.get(tintedKey);
+    if (!tinted) {
+      tinted = raster(rect.w, rect.h, dpr, surface => {
+        surface.drawImage(sprite!, 0, 0, rect.w, rect.h);
+        surface.globalCompositeOperation = 'source-in';
+        surface.fillStyle = '#fff'; surface.fillRect(0, 0, rect.w, rect.h);
+      });
+      sprites.set(tintedKey, tinted);
+    }
+    ctx.drawImage(tinted, rect.x, rect.y, rect.w, rect.h);
+    ctx.restore();
+  }
+}
+
+export function drawBackground(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  const dpr = scale(ctx);
+  const key = cacheKey('wall', width, height, dpr);
+  let image = backgrounds.get(key);
+  if (!image) {
+    image = raster(width, height, dpr, surface => {
+      const glow = surface.createRadialGradient(width * .5, height * .46, 0,
+        width * .5, height * .46, Math.max(width, height) * .72);
+      glow.addColorStop(0, '#2a2340'); glow.addColorStop(1, '#0d0b16');
+      surface.fillStyle = glow; surface.fillRect(0, 0, width, height);
+      const blockW = 114, blockH = 72;
+      surface.lineWidth = 1;
+      for (let row = 0, y = 0; y < height + blockH; row++, y += blockH) {
+        const shift = row % 2 ? -blockW / 2 : 0;
+        for (let col = -1; shift + col * blockW < width + blockW; col++) {
+          const x = shift + col * blockW;
+          surface.strokeStyle = 'rgba(142,125,171,.075)';
+          surface.beginPath(); surface.moveTo(x + 2, y + 1);
+          surface.lineTo(x + blockW - 2, y + 1); surface.lineTo(x + blockW - 2, y + blockH - 2);
+          surface.stroke();
+          if ((row * 7 + col * 3) % 5 === 0) {
+            surface.fillStyle = 'rgba(164,146,194,.026)';
+            polygon(surface, [[x + 10, y + 11], [x + 48, y + 8], [x + 30, y + 27]]);
+            surface.fill();
+          }
+        }
+      }
+    });
+    backgrounds.clear();
+    backgrounds.set(key, image);
+  }
+  ctx.drawImage(image, 0, 0, width, height);
+}
+
+export function drawBoardFrame(ctx: CanvasRenderingContext2D, board: Rect) {
+  const x = board.x - 5, y = board.y - 5, w = board.w + 10, h = board.h + 10;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 13);
+  ctx.fillStyle = '#181823'; ctx.fill();
+  ctx.strokeStyle = '#ae8250'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.beginPath(); ctx.roundRect(x + 2, y + 2, w - 4, h - 4, 10);
+  ctx.strokeStyle = '#363344'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#10121d'; ctx.fillRect(board.x, board.y, board.w, board.h);
+}
+
+export function drawBoardCell(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, alternate: boolean, selected: boolean) {
+  ctx.fillStyle = alternate ? '#222331' : '#282938';
+  ctx.fillRect(x + 1, y + 1, size - 2, size - 2);
+  if (selected) {
+    ctx.fillStyle = 'rgba(247,194,81,.17)';
+    ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
+  }
+}
+
+export function drawSelection(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+  ctx.strokeStyle = '#ffe195'; ctx.lineWidth = 3;
+  ctx.strokeRect(x + 3, y + 3, size - 6, size - 6);
+}
