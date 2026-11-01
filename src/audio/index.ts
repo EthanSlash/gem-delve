@@ -266,6 +266,20 @@ export function createAudio(): GameAudio {
   let muted = false;
 
   return {
+    unlock() {
+      try {
+        if (!context) context = obtainContext();
+        if (!context) return;
+        resume(context);
+        if (!context.createBuffer || !context.createBufferSource) return;
+        const source = context.createBufferSource();
+        source.buffer = context.createBuffer(1, 1, context.sampleRate || 44100);
+        source.connect(context.destination);
+        source.start();
+      } catch {
+        return;
+      }
+    },
     play(event, level) {
       if (muted) return;
       try {

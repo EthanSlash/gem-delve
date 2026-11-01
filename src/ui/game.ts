@@ -7,7 +7,7 @@ import { draw } from './draw';
 import type { View } from './draw';
 import { Effects } from './fx';
 import { buildTimeline, contains, dragMove, hitCell, layout, neighboringMove } from './model';
-import type { Layout, Phase } from './model';
+import type { Insets, Layout, Phase } from './model';
 
 function freshSeed(): number {
   const bytes = new Uint32Array(1);
@@ -33,18 +33,30 @@ export function startGame(canvas: HTMLCanvasElement) {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const fx = new Effects(reduced);
   let lastFrame = 0;
+  let unlocked = false;
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+  document.body.appendChild(probe);
+  let insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+
+  function readInsets() {
+    const style = getComputedStyle(probe);
+    insets = { top: parseFloat(style.paddingTop) || 0, right: parseFloat(style.paddingRight) || 0,
+      bottom: parseFloat(style.paddingBottom) || 0, left: parseFloat(style.paddingLeft) || 0 };
+  }
 
   function schedule() {
     if (!raf) { lastFrame = performance.now(); raf = requestAnimationFrame(frame); }
   }
 
   function resize() {
+    readInsets();
     const rect = canvas.getBoundingClientRect();
     const width = Math.max(1, rect.width), height = Math.max(1, rect.height);
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
     ctx!.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
-    shape = layout(width, height, run?.rewards?.length ?? GAME_CONTENT.balance.rewardOptionCount);
+    shape = layout(width, height, run?.rewards?.length ?? GAME_CONTENT.balance.rewardOptionCount, insets);
     render();
   }
 
@@ -88,7 +100,7 @@ export function startGame(canvas: HTMLCanvasElement) {
       if (elapsed >= total) {
         run = animation.result.run;
         screen = run.status;
-        shape = layout(shape.width, shape.height, run.rewards?.length ?? GAME_CONTENT.balance.rewardOptionCount);
+        shape = layout(shape.width, shape.height, run.rewards?.length ?? GAME_CONTENT.balance.rewardOptionCount, insets);
         if (screen === 'won') audio.play('win');
         if (screen === 'lost') audio.play('lose');
         if (screen === 'reward') audio.play('reward');
@@ -158,6 +170,7 @@ export function startGame(canvas: HTMLCanvasElement) {
   });
   canvas.addEventListener('pointercancel', () => { press = null; });
   canvas.addEventListener('pointerup', event => {
+    if (!unlocked) { unlocked = true; audio.unlock(); }
     if (animation || performance.now() < invalidUntil) { press = null; return; }
     const p = point(event);
     if (screen === 'title' || screen === 'won' || screen === 'lost') {
@@ -188,7 +201,26 @@ export function startGame(canvas: HTMLCanvasElement) {
     }
     press = null;
   });
+  canvas.addEventListener('contextmenu', event => event.preventDefault());
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      press = null;
+      return;
+    }
+    audio.unlock();
+    resize();
+    const now = performance.now();
+    if (animation) {
+      animation.start = now - animation.phases.reduce((total, phase) => total + phase.duration, 0);
+      animation.last = animation.phases.length - 1;
+    }
+    lastFrame = now;
+    frame(now);
+  });
   resize();
 
   if (import.meta.env.DEV) {

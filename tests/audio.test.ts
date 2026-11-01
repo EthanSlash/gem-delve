@@ -187,6 +187,26 @@ describe('audio', () => {
     expect(FakeAudioContext.instances).toHaveLength(1);
   });
 
+  it('unlocks with a silent buffer and can resume again after suspension', () => {
+    installFake();
+    const audio = createAudio();
+    audio.unlock();
+    const context = FakeAudioContext.instances[0]!;
+    expect(context.resumed).toBe(1);
+    expect(context.bufferSources).toHaveLength(1);
+    expect(context.bufferSources[0]!.started).toBe(true);
+    expect(context.bufferSources[0]!.buffer!.getChannelData()).toEqual(new Float32Array(1));
+    expect(context.oscillators).toHaveLength(0);
+    context.state = 'suspended';
+    audio.unlock();
+    expect(context.resumed).toBe(2);
+    expect(FakeAudioContext.instances).toHaveLength(1);
+  });
+
+  it('safely ignores unlock when Web Audio is unavailable', () => {
+    expect(() => createAudio().unlock()).not.toThrow();
+  });
+
   it('never creates a context while muted', () => {
     installFake();
     const audio = createAudio();

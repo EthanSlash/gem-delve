@@ -257,6 +257,8 @@ export interface GameAudio {
   // level raises the pitch of 'match' for longer chains: 1 is the first match.
   // Never throws, and does nothing while muted or where Web Audio is missing.
   play(event: SoundEvent, level?: number): void;
+  // Call from a user gesture. iOS only starts audio inside one. Never throws.
+  unlock(): void;
   setMuted(muted: boolean): void;
   isMuted(): boolean;
 }

@@ -2,47 +2,56 @@ import { BOARD_SIZE } from '../types';
 import type { Board, MatchGroup, Move, Pos, TurnResult } from '../types';
 
 export interface Rect { x: number; y: number; w: number; h: number }
+export interface Insets { top: number; right: number; bottom: number; left: number }
 export interface Layout {
   width: number; height: number; landscape: boolean;
+  safe: Rect;
   board: Rect; cell: number; header: Rect; enemy: Rect; stats: Rect; legend: Rect;
   mute: Rect; cards: Rect[]; reroll: Rect; primary: Rect;
 }
 
-export function layout(width: number, height: number, rewardCount = 3): Layout {
-  const landscape = height < 480 || width > height * 1.24;
-  const pad = Math.max(12, Math.min(24, width * 0.035));
-  const sideX = landscape ? Math.min(height - pad * 2, width * 0.56) + pad * 2 : pad;
-  const sideW = landscape ? width - sideX - pad : width - 2 * pad;
+export function layout(width: number, height: number, rewardCount = 3,
+  insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 }): Layout {
+  const safe: Rect = { x: insets.left, y: insets.top,
+    w: Math.max(1, width - insets.left - insets.right), h: Math.max(1, height - insets.top - insets.bottom) };
+  const { w, h } = safe;
+  const landscape = h < 480 || w > h * 1.24;
+  const pad = Math.max(12, Math.min(24, w * 0.035));
+  const sideX = landscape ? Math.min(h - pad * 2, w * 0.56) + pad * 2 : pad;
+  const sideW = landscape ? w - sideX - pad : w - 2 * pad;
   const size = landscape
-    ? Math.min(height - pad * 2, width * 0.55, width - pad * 2 - 116)
-    : Math.min(width - pad * 2, Math.max(180, height - 285));
-  const board: Rect = { x: landscape ? pad + (sideX - 2 * pad - size) / 2 : (width - size) / 2,
-    y: landscape ? (height - size) / 2 : Math.max(193, Math.min(height - size - 57, height * 0.33)), w: size, h: size };
+    ? Math.min(h - pad * 2, w * 0.55, w - pad * 2 - 116)
+    : Math.min(w - pad * 2, Math.max(180, h - 285));
+  const board: Rect = { x: landscape ? pad + (sideX - 2 * pad - size) / 2 : (w - size) / 2,
+    y: landscape ? (h - size) / 2 : Math.max(193, Math.min(h - size - 57, h * 0.33)), w: size, h: size };
   const header: Rect = landscape ? { x: sideX, y: pad + 5, w: sideW, h: 92 }
     : { x: pad, y: 15, w: sideW, h: 92 };
   const enemySize = landscape ? Math.min(56, Math.max(50, sideW - 54)) : 78;
-  const enemy: Rect = landscape ? { x: sideW < 180 ? width - pad - enemySize : sideX, y: pad + 47, w: enemySize, h: enemySize }
-    : { x: width - pad - enemySize, y: 63, w: enemySize, h: enemySize };
+  const enemy: Rect = landscape ? { x: sideW < 180 ? w - pad - enemySize : sideX, y: pad + 47, w: enemySize, h: enemySize }
+    : { x: w - pad - enemySize, y: 63, w: enemySize, h: enemySize };
   const stats: Rect = landscape ? { x: sideX, y: pad + 104, w: sideW, h: 90 }
     : { x: pad, y: 146, w: sideW, h: 52 };
   const legend: Rect = landscape ? { x: sideX, y: stats.y + stats.h + 12, w: sideW, h: 58 }
     : { x: pad, y: board.y + size + 10, w: sideW, h: 52 };
-  const mute: Rect = { x: width - pad - 48, y: 17, w: 48, h: 40 };
+  const mute: Rect = { x: w - pad - 48, y: 12, w: 48, h: 44 };
   const count = Math.max(1, rewardCount);
   const cardX = pad;
-  const cardW = landscape ? Math.min(320, (width - 2 * pad - 16 * (count - 1)) / count) : width - pad * 2;
-  const cardTop = landscape ? Math.max(120, height * .28) : 114;
+  const cardW = landscape ? Math.min(320, (w - 2 * pad - 16 * (count - 1)) / count) : w - pad * 2;
+  const cardTop = landscape ? Math.max(120, h * .28) : 114;
   const footer = 105;
   const gap = 9;
-  const cardH = landscape ? Math.min(190, height - cardTop - footer) : Math.min(120, Math.max(48, (height - cardTop - footer - gap * (count - 1)) / count));
+  const cardH = landscape ? Math.min(190, h - cardTop - footer) : Math.min(120, Math.max(48, (h - cardTop - footer - gap * (count - 1)) / count));
   const rowW = count * cardW + (count - 1) * 16;
-  const cards = Array.from({ length: count }, (_, i) => ({ x: landscape ? (width - rowW) / 2 + i * (cardW + 16) : cardX,
+  const cards = Array.from({ length: count }, (_, i) => ({ x: landscape ? (w - rowW) / 2 + i * (cardW + 16) : cardX,
     y: landscape ? cardTop : cardTop + i * (cardH + gap), w: cardW, h: cardH }));
-  const reroll: Rect = { x: landscape ? (width - Math.min(320, width - 2 * pad)) / 2 : cardX,
-    y: landscape ? Math.min(height - 68, cardTop + cardH + 24) : Math.min(height - 68, cardTop + count * (cardH + gap) + 8),
-    w: landscape ? Math.min(320, width - 2 * pad) : cardW, h: 46 };
-  const primary: Rect = { x: (width - Math.min(280, width - 2 * pad)) / 2, y: Math.min(height - 96, height * 0.69), w: Math.min(280, width - 2 * pad), h: 58 };
-  return { width, height, landscape, board, cell: size / BOARD_SIZE, header, enemy, stats, legend, mute, cards, reroll, primary };
+  const reroll: Rect = { x: landscape ? (w - Math.min(320, w - 2 * pad)) / 2 : cardX,
+    y: landscape ? Math.min(h - 68, cardTop + cardH + 24) : Math.min(h - 68, cardTop + count * (cardH + gap) + 8),
+    w: landscape ? Math.min(320, w - 2 * pad) : cardW, h: 46 };
+  const primary: Rect = { x: (w - Math.min(280, w - 2 * pad)) / 2, y: Math.min(h - 96, h * 0.69), w: Math.min(280, w - 2 * pad), h: 58 };
+  const shift = (r: Rect): Rect => ({ ...r, x: r.x + safe.x, y: r.y + safe.y });
+  return { width, height, landscape, safe, board: shift(board), cell: size / BOARD_SIZE,
+    header: shift(header), enemy: shift(enemy), stats: shift(stats), legend: shift(legend),
+    mute: shift(mute), cards: cards.map(shift), reroll: shift(reroll), primary: shift(primary) };
 }
 
 export function contains(rect: Rect, x: number, y: number): boolean {

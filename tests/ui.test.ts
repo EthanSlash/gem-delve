@@ -37,6 +37,26 @@ describe('canvas geometry and input', () => {
       if (height! < 480) expect(landscape).toBe(true);
     }
   });
+  it('keeps phone controls and content inside portrait and landscape safe areas', () => {
+    for (const [width, height, insets] of [
+      [390, 844, { top: 47, right: 0, bottom: 34, left: 0 }],
+      [844, 390, { top: 0, right: 47, bottom: 0, left: 47 }],
+    ] as const) {
+      const shape = layout(width, height, 3, insets);
+      for (const rect of [shape.board, shape.mute, shape.primary, ...shape.cards, shape.reroll,
+        shape.header, shape.enemy, shape.stats, shape.legend]) {
+        expect(rect.x).toBeGreaterThanOrEqual(insets.left);
+        expect(rect.y).toBeGreaterThanOrEqual(insets.top);
+        expect(rect.x + rect.w).toBeLessThanOrEqual(width - insets.right);
+        expect(rect.y + rect.h).toBeLessThanOrEqual(height - insets.bottom);
+      }
+    }
+  });
+  it('gives mute a finger-sized target on a 360x640 phone', () => {
+    const { mute } = layout(360, 640);
+    expect(mute.w).toBeGreaterThanOrEqual(44);
+    expect(mute.h).toBeGreaterThanOrEqual(44);
+  });
   it('requires adjacent clicks and chooses the strongest drag direction', () => {
     const a = { row: 2, col: 2 };
     expect(neighboringMove(a, { row: 3, col: 2 })?.b).toEqual({ row: 3, col: 2 });

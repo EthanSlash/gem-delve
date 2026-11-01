@@ -64,6 +64,15 @@ function text(ctx: CanvasRenderingContext2D, value: string, x: number, y: number
   ctx.fillStyle = color; ctx.font = `${weight} ${size}px system-ui, sans-serif`;
   ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillText(value, x, y);
 }
+function fittedText(ctx: CanvasRenderingContext2D, value: string, x: number, y: number,
+  maxWidth: number, size: number, color = ink, align: CanvasTextAlign = 'left', weight = 'normal') {
+  ctx.font = `${weight} ${size}px system-ui, sans-serif`;
+  if (ctx.measureText(value).width > maxWidth) {
+    while (value.length && ctx.measureText(value + '…').width > maxWidth) value = value.slice(0, -1);
+    value += '…';
+  }
+  text(ctx, value, x, y, size, color, align, weight);
+}
 function board(ctx: CanvasRenderingContext2D, shape: Layout, cells: Board, view: View) {
   const { board: b, cell: s } = shape;
   drawBoardFrame(ctx, b);
@@ -103,32 +112,34 @@ function rewardText(option: RewardOption, content: GameContent): [string, string
 }
 
 export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, content: GameContent) {
-  const { width: w, height: h } = shape;
+  const { width: w, height: h, safe } = shape;
+  const cx = safe.x + safe.w / 2;
   drawBackground(ctx, w, h);
   const run = view.run;
   if (view.screen === 'title') {
     for (const [color, dx, dy, s] of [['purple',0,-15,86],['red',-47,12,62],['green',47,12,62],['yellow',0,39,54]] as const)
-      drawSprite(ctx, { kind: 'gem', color }, w / 2 + dx, h * .22 + dy, s);
+      drawSprite(ctx, { kind: 'gem', color }, cx + dx, safe.y + safe.h * .22 + dy, s);
     ctx.shadowColor = '#ad7942'; ctx.shadowBlur = 17;
-    text(ctx, '寶石地城', w / 2, h * .35, Math.min(46, w * .11), '#f9d58f', 'center', 'bold');
+    text(ctx, '寶石地城', cx, safe.y + safe.h * .35, Math.min(46, safe.w * .11), '#f9d58f', 'center', 'bold');
     ctx.shadowBlur = 0;
-    text(ctx, '交換相鄰寶石，消除三顆以上擊敗敵人', w / 2, h * .49, Math.max(14, Math.min(16, w * .038)), '#cebca5', 'center');
+    fittedText(ctx, '交換相鄰寶石，消除三顆以上擊敗敵人', cx, safe.y + safe.h * .49,
+      safe.w - 24, Math.max(14, Math.min(16, safe.w * .038)), '#cebca5', 'center');
     button(ctx, shape.primary);
-    text(ctx, '開始探險', w / 2, shape.primary.y + shape.primary.h / 2, 22, '#fff4de', 'center', 'bold');
+    text(ctx, '開始探險', cx, shape.primary.y + shape.primary.h / 2, 22, '#fff4de', 'center', 'bold');
     return;
   }
   if (!run) return;
   if (view.screen === 'won' || view.screen === 'lost') {
-    box(ctx, { x: w * .1, y: h * .17, w: w * .8, h: h * .44 });
-    text(ctx, view.screen === 'won' ? '地城征服！' : '冒險結束', w / 2, h * .28, Math.min(40, w * .1), view.screen === 'won' ? '#f3cb70' : '#e96a60', 'center', 'bold');
-    text(ctx, `抵達第 ${run.floor}／${content.enemies.length} 層`, w / 2, h * .43, 20, ink, 'center');
-    text(ctx, `金幣 ${run.player.gold}`, w / 2, h * .51, 20, '#f3cb70', 'center');
+    box(ctx, { x: safe.x + safe.w * .1, y: safe.y + safe.h * .17, w: safe.w * .8, h: safe.h * .44 });
+    text(ctx, view.screen === 'won' ? '地城征服！' : '冒險結束', cx, safe.y + safe.h * .28, Math.min(40, safe.w * .1), view.screen === 'won' ? '#f3cb70' : '#e96a60', 'center', 'bold');
+    text(ctx, `抵達第 ${run.floor}／${content.enemies.length} 層`, cx, safe.y + safe.h * .43, 20, ink, 'center');
+    text(ctx, `金幣 ${run.player.gold}`, cx, safe.y + safe.h * .51, 20, '#f3cb70', 'center');
     button(ctx, shape.primary);
-    text(ctx, '重新開始', w / 2, shape.primary.y + shape.primary.h / 2, 22, ink, 'center', 'bold');
+    text(ctx, '重新開始', cx, shape.primary.y + shape.primary.h / 2, 22, ink, 'center', 'bold');
     return;
   }
   if (view.screen === 'reward') {
-    text(ctx, `第 ${run.floor} 層完成`, w / 2, shape.landscape ? shape.cards[0]!.y - 55 : 42, 25, '#f3cb70', 'center', 'bold');
+    text(ctx, `第 ${run.floor} 層完成`, cx, shape.landscape ? shape.cards[0]!.y - 55 : safe.y + 42, 25, '#f3cb70', 'center', 'bold');
     for (let i = 0; i < (run.rewards?.length ?? 0); i++) {
       const r = shape.cards[i]; if (!r) continue;
       box(ctx, r);
@@ -147,18 +158,20 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
         let line = '', lineIndex = 0;
         for (const char of detail) {
           if (line && ctx.measureText(line + char).width > r.w - 30) {
-            text(ctx, line, r.x + 15, r.y + 58 + lineIndex * 23, detailSize, '#c9d6d6');
+            if (r.y + 58 + lineIndex * 23 <= r.y + r.h - 10)
+              text(ctx, line, r.x + 15, r.y + 58 + lineIndex * 23, detailSize, '#c9d6d6');
             line = ''; lineIndex++;
           }
           line += char;
         }
-        if (line) text(ctx, line, r.x + 15, r.y + 58 + lineIndex * 23, detailSize, '#c9d6d6');
-      } else text(ctx, detail, r.x + 15, r.y + (compact ? 38 : 58), detailSize, '#c9d6d6');
+        if (line && r.y + 58 + lineIndex * 23 <= r.y + r.h - 10)
+          text(ctx, line, r.x + 15, r.y + 58 + lineIndex * 23, detailSize, '#c9d6d6');
+      } else fittedText(ctx, detail, r.x + 15, r.y + (compact ? 38 : 58), r.w - 30, detailSize, '#c9d6d6');
     }
     const affordable = run.player.gold >= content.balance.rerollCost;
-     button(ctx, shape.reroll, affordable);
-    text(ctx, `重新挑選  ${content.balance.rerollCost} 金幣  （持有 ${run.player.gold}）`, shape.reroll.x + shape.reroll.w / 2,
-        shape.reroll.y + shape.reroll.h / 2, Math.max(14, Math.min(16, shape.reroll.w * .041)), affordable ? ink : '#91989a', 'center');
+    button(ctx, shape.reroll, affordable);
+    fittedText(ctx, `重新挑選  ${content.balance.rerollCost} 金幣  （持有 ${run.player.gold}）`, shape.reroll.x + shape.reroll.w / 2,
+        shape.reroll.y + shape.reroll.h / 2, shape.reroll.w - 20, Math.max(14, Math.min(16, shape.reroll.w * .041)), affordable ? ink : '#91989a', 'center');
     return;
   }
   const combat = run.combat;
@@ -191,7 +204,7 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   icon(ctx, 'sword', badge.x + 13, badge.y + 10, 15);
   text(ctx, narrow ? `${countdown}` : `${Math.max(0, enemyHp)}/${enemy?.maxHp ?? 0}  ${countdown} 步`, badge.x + 27, badge.y + 11, 14, '#f3d3b9');
   button(ctx, shape.mute, false);
-  text(ctx, view.muted ? '靜音' : '音效', shape.mute.x + 24, shape.mute.y + 20, 14, ink, 'center');
+  text(ctx, view.muted ? '靜音' : '音效', shape.mute.x + shape.mute.w / 2, shape.mute.y + shape.mute.h / 2, 14, ink, 'center');
   const player = resolved ? view.turn!.state.player : applied ? { ...combat.player,
     hp: Math.min(combat.player.maxHp, combat.player.hp + view.turn!.effects.heal),
     gold: combat.player.gold + view.turn!.effects.gold } : combat.player;
@@ -212,7 +225,8 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
     sx += 30 + ctx.measureText(value).width + (narrow ? 2 : shape.landscape ? 8 : 19);
   }
   const relics = player.relics.map(id => content.relics.find(r => r.id === id)?.name ?? id).join('、');
-  text(ctx, `遺物：${relics || '無'}`, stats.x, stats.y + (narrow ? 68 : 40), Math.max(14, Math.min(16, stats.w * .042)), '#d5bc9c');
+  fittedText(ctx, `遺物：${relics || '無'}`, stats.x, stats.y + (narrow ? 68 : 40),
+    stats.w, Math.max(14, Math.min(16, stats.w * .042)), '#d5bc9c');
   board(ctx, shape, view.phase?.kind === 'enemy' && view.progress > .5 ? view.turn!.state.board : view.board ?? combat.board, view);
   for (const p of view.fx.particles) {
     ctx.globalAlpha = Math.max(0, 1 - p.age / p.life);
