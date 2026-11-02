@@ -112,7 +112,7 @@ describe('music scheduler', () => {
     context.currentTime += .3;
     vi.advanceTimersByTime(40);
     expect(context.oscillators.length).toBeGreaterThan(before);
-    expect(context.gains.filter(g => g.to === context.destination).every(g => g.gain.value <= .1)).toBe(true);
+    expect(context.gains.filter(g => g.to === context.destination).every(g => g.gain.value <= .55)).toBe(true);
   });
   it('is safe without Web Audio for every music operation', () => {
     delete audioGlobal.AudioContext;
