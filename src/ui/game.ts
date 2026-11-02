@@ -2,7 +2,7 @@ import { createAudio } from '../audio/index';
 import { findValidMoves } from '../core/index';
 import { GAME_CONTENT } from '../data/index';
 import { chooseReward, createRun, playMove, rerollRewards } from '../run/index';
-import type { Move, Pos, RunState, RunTurnResult } from '../types';
+import type { Move, MusicTrack, Pos, RunState, RunTurnResult } from '../types';
 import { draw } from './draw';
 import type { View } from './draw';
 import { Effects } from './fx';
@@ -19,11 +19,27 @@ export function startGame(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const audio = createAudio();
+  function preference(key: string): boolean {
+    try { return localStorage.getItem(key) === 'true'; } catch { return false; }
+  }
+  function savePreference(key: string, value: boolean) {
+    try { localStorage.setItem(key, String(value)); } catch { /* storage may be unavailable */ }
+  }
+  audio.setMuted(preference('gemDelve.effectsMuted'));
+  audio.setMusicMuted(preference('gemDelve.musicMuted'));
   const requested = new URLSearchParams(location.search).get('seed');
   const parsed = requested === null ? NaN : Number(requested);
   let nextSeed = requested !== null && requested.trim() !== '' && Number.isSafeInteger(parsed) ? parsed >>> 0 : freshSeed();
   let run: RunState | null = null;
   let screen: View['screen'] = 'title';
+  let currentMusic: MusicTrack = 'title';
+  audio.setMusic(currentMusic);
+  function updateMusic() {
+    currentMusic = screen === 'combat' && run?.combat
+      ? run.floor === GAME_CONTENT.enemies.length && GAME_CONTENT.enemies[run.floor - 1]?.isBoss ? 'boss' : 'combat'
+      : 'title';
+    audio.setMusic(currentMusic);
+  }
   let shape: Layout;
   let selected: Pos | undefined;
   let press: { pos: Pos; x: number; y: number; id: number } | null = null;
@@ -100,6 +116,7 @@ export function startGame(canvas: HTMLCanvasElement) {
       if (elapsed >= total) {
         run = animation.result.run;
         screen = run.status;
+        updateMusic();
         shape = layout(shape.width, shape.height, run.rewards?.length ?? GAME_CONTENT.balance.rewardOptionCount, insets);
         if (screen === 'won') audio.play('win');
         if (screen === 'lost') audio.play('lose');
@@ -129,7 +146,7 @@ export function startGame(canvas: HTMLCanvasElement) {
       screen, run, board: phase?.board ?? run?.combat?.board, phase, progress,
       move: animation?.move, turn: animation?.result.turn, selected,
       shake: now < invalidUntil ? (invalidUntil - now) / 260 : 0,
-      muted: audio.isMuted(), reduced, fx,
+      muted: audio.isMuted(), musicMuted: audio.isMusicMuted(), reduced, fx,
     }, GAME_CONTENT);
     ctx!.restore();
   }
@@ -151,7 +168,7 @@ export function startGame(canvas: HTMLCanvasElement) {
     if (!run || screen !== 'reward' || animation) return;
     const next = chooseReward(run, index, GAME_CONTENT);
     if (next === run) return;
-    run = next; screen = run.status; selected = undefined; fx.reset();
+    run = next; screen = run.status; updateMusic(); selected = undefined; fx.reset();
     audio.play('reward'); render();
   }
 
@@ -177,9 +194,15 @@ export function startGame(canvas: HTMLCanvasElement) {
     if (!unlocked) { unlocked = true; audio.unlock(); }
     if (animation || performance.now() < invalidUntil) { press = null; return; }
     const p = point(event);
+    if (contains(shape.mute, p.x, p.y)) {
+      audio.setMuted(!audio.isMuted()); savePreference('gemDelve.effectsMuted', audio.isMuted()); render(); press = null; return;
+    }
+    if (contains(shape.music, p.x, p.y)) {
+      audio.setMusicMuted(!audio.isMusicMuted()); savePreference('gemDelve.musicMuted', audio.isMusicMuted()); render(); press = null; return;
+    }
     if (screen === 'title' || screen === 'won' || screen === 'lost') {
       if (contains(shape.primary, p.x, p.y)) {
-        run = createRun(nextSeed, GAME_CONTENT); nextSeed = freshSeed(); screen = 'combat'; selected = undefined; fx.reset();
+        run = createRun(nextSeed, GAME_CONTENT); nextSeed = freshSeed(); screen = 'combat'; updateMusic(); selected = undefined; fx.reset();
         audio.play('select'); render();
       }
     } else if (screen === 'reward' && run) {
@@ -189,8 +212,7 @@ export function startGame(canvas: HTMLCanvasElement) {
         run = rerollRewards(run, GAME_CONTENT); audio.play('reward'); render();
       }
     } else if (screen === 'combat') {
-      if (contains(shape.mute, p.x, p.y)) { audio.setMuted(!audio.isMuted()); render(); }
-      else if (press?.id === event.pointerId) {
+      if (press?.id === event.pointerId) {
         const dragging = dragMove(press.pos, p.x - press.x, p.y - press.y, shape.cell * .22);
         if (dragging) play(dragging);
         else {
@@ -210,12 +232,14 @@ export function startGame(canvas: HTMLCanvasElement) {
   window.addEventListener('orientationchange', resize);
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
+      audio.setSuspended(true);
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       press = null;
       return;
     }
-    audio.unlock();
+    audio.setSuspended(false);
+    if (unlocked) audio.unlock();
     resize();
     const now = performance.now();
     if (animation) {
@@ -230,6 +254,7 @@ export function startGame(canvas: HTMLCanvasElement) {
   if (import.meta.env.DEV) {
     Object.assign(window, { __gemDelve: {
       getRun: () => run,
+      getMusic: () => currentMusic,
       getValidMoves: () => run?.status === 'combat' && run.combat ? findValidMoves(run.combat.board) : [],
       play, chooseReward: pickReward, isAnimating: () => animation !== null || performance.now() < invalidUntil,
     } });

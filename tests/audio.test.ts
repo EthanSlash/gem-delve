@@ -222,6 +222,22 @@ describe('audio', () => {
     expect(() => createAudio().unlock()).not.toThrow();
   });
 
+  it('keeps music state independent and safe when Web Audio is missing', () => {
+    const audio = createAudio();
+    expect(audio.isMusicMuted()).toBe(false);
+    expect(() => {
+      audio.setMusic('title');
+      audio.setMuted(true);
+      audio.setMusicMuted(true);
+      audio.setSuspended(true);
+      audio.unlock();
+      audio.setSuspended(false);
+      audio.setMusic(null);
+    }).not.toThrow();
+    expect(audio.isMuted()).toBe(true);
+    expect(audio.isMusicMuted()).toBe(true);
+  });
+
   it('never creates a context while muted', () => {
     installFake();
     const audio = createAudio();

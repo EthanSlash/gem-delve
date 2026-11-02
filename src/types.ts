@@ -252,8 +252,18 @@ export type SoundEvent =
   | 'win'
   | 'lose';
 
+export type MusicTrack = 'title' | 'combat' | 'boss';
+
 // Implemented by src/audio/index.ts as `createAudio(): GameAudio`.
 export interface GameAudio {
+  // Crossfades to a looping track, or fades out on null. The same track keeps playing without
+  // restarting. Sound only starts after unlock(). Never throws.
+  setMusic(track: MusicTrack | null): void;
+  // Independent of setMuted, which silences sound effects only.
+  setMusicMuted(muted: boolean): void;
+  isMusicMuted(): boolean;
+  // Stops or resumes the scheduler, for when the page is hidden or shown.
+  setSuspended(suspended: boolean): void;
   // level raises the pitch of 'match' for longer chains: 1 is the first match.
   // Never throws, and does nothing while muted or where Web Audio is missing.
   play(event: SoundEvent, level?: number): void;

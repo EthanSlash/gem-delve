@@ -53,9 +53,38 @@ describe('canvas geometry and input', () => {
     }
   });
   it('gives mute a finger-sized target on a 360x640 phone', () => {
-    const { mute } = layout(360, 640);
+    const { mute, music } = layout(360, 640);
     expect(mute.w).toBeGreaterThanOrEqual(44);
     expect(mute.h).toBeGreaterThanOrEqual(44);
+    expect(music.w).toBeGreaterThanOrEqual(44);
+    expect(music.h).toBeGreaterThanOrEqual(44);
+  });
+  it('keeps both audio controls in the safe area and away from interactive content', () => {
+    const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && a.x + a.w > b.x &&
+      a.y < b.y + b.h && a.y + a.h > b.y;
+    for (const [width, height, insets] of [
+      [320, 320, { top: 0, right: 0, bottom: 0, left: 0 }],
+      [360, 640, { top: 0, right: 0, bottom: 0, left: 0 }],
+      [375, 812, { top: 0, right: 0, bottom: 0, left: 0 }],
+      [390, 844, { top: 47, right: 0, bottom: 34, left: 0 }],
+      [480, 400, { top: 0, right: 0, bottom: 0, left: 0 }],
+      [640, 360, { top: 0, right: 0, bottom: 0, left: 0 }],
+      [844, 390, { top: 0, right: 0, bottom: 0, left: 0 }],
+      [844, 390, { top: 0, right: 47, bottom: 0, left: 47 }],
+      [800, 600, { top: 0, right: 0, bottom: 0, left: 0 }],
+      [1024, 768, { top: 0, right: 0, bottom: 0, left: 0 }],
+    ] as const) {
+      const shape = layout(width, height, 3, insets);
+      for (const control of [shape.music, shape.mute]) {
+        expect(control.x).toBeGreaterThanOrEqual(shape.safe.x);
+        expect(control.y).toBeGreaterThanOrEqual(shape.safe.y);
+        expect(control.x + control.w).toBeLessThanOrEqual(shape.safe.x + shape.safe.w);
+        expect(control.y + control.h).toBeLessThanOrEqual(shape.safe.y + shape.safe.h);
+        for (const other of [shape.board, shape.stats, shape.enemy, ...shape.cards, shape.primary])
+          expect(overlaps(control, other)).toBe(false);
+      }
+      expect(overlaps(shape.music, shape.mute)).toBe(false);
+    }
   });
   it('requires adjacent clicks and chooses the strongest drag direction', () => {
     const a = { row: 2, col: 2 };

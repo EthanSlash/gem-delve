@@ -7,7 +7,7 @@ export interface Layout {
   width: number; height: number; landscape: boolean;
   safe: Rect;
   board: Rect; cell: number; header: Rect; enemy: Rect; stats: Rect; legend: Rect;
-  mute: Rect; cards: Rect[]; reroll: Rect; primary: Rect;
+  mute: Rect; music: Rect; cards: Rect[]; reroll: Rect; primary: Rect;
 }
 
 export function layout(width: number, height: number, rewardCount = 3,
@@ -33,7 +33,8 @@ export function layout(width: number, height: number, rewardCount = 3,
     : { x: pad, y: 146, w: sideW, h: 52 };
   const legend: Rect = landscape ? { x: sideX, y: stats.y + stats.h + 12, w: sideW, h: 58 }
     : { x: pad, y: board.y + size + 10, w: sideW, h: 52 };
-  const mute: Rect = { x: w - pad - 48, y: 12, w: 48, h: 44 };
+  const mute: Rect = { x: w - pad - 48, y: 4, w: 48, h: 44 };
+  const music: Rect = { x: mute.x - 56, y: mute.y, w: 48, h: 44 };
   const count = Math.max(1, rewardCount);
   const cardX = pad;
   const cardW = landscape ? Math.min(320, (w - 2 * pad - 16 * (count - 1)) / count) : w - pad * 2;
@@ -51,7 +52,7 @@ export function layout(width: number, height: number, rewardCount = 3,
   const shift = (r: Rect): Rect => ({ ...r, x: r.x + safe.x, y: r.y + safe.y });
   return { width, height, landscape, safe, board: shift(board), cell: size / BOARD_SIZE,
     header: shift(header), enemy: shift(enemy), stats: shift(stats), legend: shift(legend),
-    mute: shift(mute), cards: cards.map(shift), reroll: shift(reroll), primary: shift(primary) };
+    mute: shift(mute), music: shift(music), cards: cards.map(shift), reroll: shift(reroll), primary: shift(primary) };
 }
 
 export function contains(rect: Rect, x: number, y: number): boolean {

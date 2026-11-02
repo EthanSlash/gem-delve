@@ -15,6 +15,7 @@ export interface View {
   selected?: { row: number; col: number };
   shake?: number;
   muted: boolean;
+  musicMuted: boolean;
   reduced: boolean;
   fx: Effects;
 }
@@ -115,6 +116,12 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   const { width: w, height: h, safe } = shape;
   const cx = safe.x + safe.w / 2;
   drawBackground(ctx, w, h);
+  const controls = () => {
+    button(ctx, shape.mute, false);
+    text(ctx, view.muted ? '靜音' : '音效', shape.mute.x + shape.mute.w / 2, shape.mute.y + shape.mute.h / 2, 14, ink, 'center');
+    button(ctx, shape.music, false);
+    text(ctx, view.musicMuted ? '音樂關' : '音樂', shape.music.x + shape.music.w / 2, shape.music.y + shape.music.h / 2, 14, ink, 'center');
+  };
   const run = view.run;
   if (view.screen === 'title') {
     for (const [color, dx, dy, s] of [['purple',0,-15,86],['red',-47,12,62],['green',47,12,62],['yellow',0,39,54]] as const)
@@ -126,6 +133,7 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
       safe.w - 24, Math.max(14, Math.min(16, safe.w * .038)), '#cebca5', 'center');
     button(ctx, shape.primary);
     text(ctx, '開始探險', cx, shape.primary.y + shape.primary.h / 2, 22, '#fff4de', 'center', 'bold');
+    controls();
     return;
   }
   if (!run) return;
@@ -136,10 +144,13 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
     text(ctx, `金幣 ${run.player.gold}`, cx, safe.y + safe.h * .51, 20, '#f3cb70', 'center');
     button(ctx, shape.primary);
     text(ctx, '重新開始', cx, shape.primary.y + shape.primary.h / 2, 22, ink, 'center', 'bold');
+    controls();
     return;
   }
   if (view.screen === 'reward') {
-    text(ctx, `第 ${run.floor} 層完成`, cx, shape.landscape ? shape.cards[0]!.y - 55 : safe.y + 42, 25, '#f3cb70', 'center', 'bold');
+    text(ctx, `第 ${run.floor} 層完成`, shape.landscape ? cx : safe.x + 20,
+      shape.landscape ? shape.cards[0]!.y - 55 : safe.y + 42, shape.landscape ? 25 : 21,
+      '#f3cb70', shape.landscape ? 'center' : 'left', 'bold');
     for (let i = 0; i < (run.rewards?.length ?? 0); i++) {
       const r = shape.cards[i]; if (!r) continue;
       box(ctx, r);
@@ -172,6 +183,7 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
     button(ctx, shape.reroll, affordable);
     fittedText(ctx, `重新挑選  ${content.balance.rerollCost} 金幣  （持有 ${run.player.gold}）`, shape.reroll.x + shape.reroll.w / 2,
         shape.reroll.y + shape.reroll.h / 2, shape.reroll.w - 20, Math.max(14, Math.min(16, shape.reroll.w * .041)), affordable ? ink : '#91989a', 'center');
+    controls();
     return;
   }
   const combat = run.combat;
@@ -203,8 +215,7 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   box(ctx, badge, '#302632', '#ae8250', 5);
   icon(ctx, 'sword', badge.x + 13, badge.y + 10, 15);
   text(ctx, narrow ? `${countdown}` : `${Math.max(0, enemyHp)}/${enemy?.maxHp ?? 0}  ${countdown} 步`, badge.x + 27, badge.y + 11, 14, '#f3d3b9');
-  button(ctx, shape.mute, false);
-  text(ctx, view.muted ? '靜音' : '音效', shape.mute.x + shape.mute.w / 2, shape.mute.y + shape.mute.h / 2, 14, ink, 'center');
+  controls();
   const player = resolved ? view.turn!.state.player : applied ? { ...combat.player,
     hp: Math.min(combat.player.maxHp, combat.player.hp + view.turn!.effects.heal),
     gold: combat.player.gold + view.turn!.effects.gold } : combat.player;

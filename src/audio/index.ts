@@ -1,4 +1,5 @@
-import type { GameAudio, SoundEvent } from '../types';
+import type { GameAudio, MusicTrack, SoundEvent } from '../types';
+import { MUSIC, notesBetween } from './music';
 
 type Wave = 'sine' | 'square' | 'sawtooth' | 'triangle';
 
@@ -24,6 +25,7 @@ interface OscillatorNodeLike extends NodeLike {
   detune?: ParamLike;
   start(startTime?: number): void;
   stop(stopTime?: number): void;
+  onended?: (() => void) | null;
 }
 
 interface FilterNodeLike extends NodeLike {
@@ -41,6 +43,7 @@ interface BufferSourceNodeLike extends NodeLike {
   loop: boolean;
   start(startTime?: number): void;
   stop(stopTime?: number): void;
+  onended?: (() => void) | null;
 }
 
 interface AudioContextLike {
@@ -264,6 +267,68 @@ function obtainContext(): AudioContextLike | null {
 export function createAudio(): GameAudio {
   let context: AudioContextLike | null = null;
   let muted = false;
+  let musicMuted = false;
+  let suspended = false;
+  let unlocked = false;
+  let chosen: MusicTrack | null = null;
+  type Playing = { track: MusicTrack; bus: GainNodeLike; origin: number; next: number };
+  let playing: Playing | null = null;
+  const retiring: { bus: GainNodeLike; until: number }[] = [];
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let noiseBuffer: BufferLike | null = null;
+
+  function tick() {
+    if (!context) return;
+    const now = context.currentTime;
+    for (let i = retiring.length - 1; i >= 0; i--) {
+      if (now >= retiring[i]!.until) {
+        retiring[i]!.bus.disconnect?.();
+        retiring.splice(i, 1);
+      }
+    }
+    if (playing && !suspended && !musicMuted) {
+      const part = playing;
+      const secondsPerBeat = 60 / MUSIC[part.track].bpm;
+      if (part.next < now) { // clock jumped (e.g. background tab): discard missed beats
+        part.origin = now + .03;
+        part.next = part.origin;
+      }
+      const end = now + .2;
+      if (part.next < end) {
+        for (const note of notesBetween(part.track, (part.next - part.origin) / secondsPerBeat,
+          (end - part.origin) / secondsPerBeat)) {
+          try { musicVoice(context, part.bus, note, part.origin + note.beat * secondsPerBeat,
+            secondsPerBeat, () => {
+              if (!noiseBuffer && context?.createBuffer) noiseBuffer = makeNoise(context);
+              return noiseBuffer;
+            }); } catch { /* keep the rest of the music playing */ }
+        }
+        part.next = end;
+      }
+    }
+    if (!playing && !retiring.length && timer !== null) { clearInterval(timer); timer = null; }
+  }
+
+  function fadeOut(duration = .8) {
+    if (!playing || !context) return;
+    const bus = playing.bus;
+    bus.gain.setValueAtTime(bus.gain.value, context.currentTime);
+    bus.gain.linearRampToValueAtTime(0, context.currentTime + duration);
+    retiring.push({ bus, until: context.currentTime + duration + .05 });
+    playing = null;
+  }
+
+  function startMusic() {
+    if (!unlocked || !chosen || musicMuted || suspended || !context || playing) return;
+    const bus = context.createGain();
+    bus.gain.setValueAtTime(0, context.currentTime);
+    bus.gain.linearRampToValueAtTime(.55, context.currentTime + .8);
+    bus.connect(context.destination);
+    const origin = context.currentTime + .03;
+    playing = { track: chosen, bus, origin, next: origin };
+    if (timer === null) timer = setInterval(() => { try { tick(); } catch { /* Web Audio is optional */ } }, 40);
+    tick();
+  }
 
   return {
     unlock() {
@@ -271,6 +336,8 @@ export function createAudio(): GameAudio {
         if (!context) context = obtainContext();
         if (!context) return;
         resume(context);
+        unlocked = true;
+        startMusic();
         if (!context.createBuffer || !context.createBufferSource) return;
         const source = context.createBufferSource();
         source.buffer = context.createBuffer(1, 1, context.sampleRate || 44100);
@@ -297,5 +364,69 @@ export function createAudio(): GameAudio {
     isMuted() {
       return muted;
     },
+    setMusic(track) {
+      try {
+        if (track === chosen) return;
+        chosen = track;
+        fadeOut();
+        startMusic();
+      } catch { /* Web Audio is optional */ }
+    },
+    setMusicMuted(value) {
+      musicMuted = Boolean(value);
+      try {
+        if (musicMuted) fadeOut(.08);
+        else startMusic();
+      } catch { /* Web Audio is optional */ }
+    },
+    isMusicMuted() { return musicMuted; },
+    setSuspended(value) {
+      if (suspended === Boolean(value)) return;
+      suspended = Boolean(value);
+      try {
+        if (suspended) fadeOut(.12);
+        else startMusic();
+      } catch { /* Web Audio is optional */ }
+    },
   };
+}
+
+function makeNoise(context: AudioContextLike): BufferLike | null {
+  if (!context.createBuffer) return null;
+  const buffer = context.createBuffer(1, Math.floor((context.sampleRate || 44100) * .13), context.sampleRate || 44100);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  return buffer;
+}
+
+function musicVoice(context: AudioContextLike, bus: GainNodeLike, note: ReturnType<typeof notesBetween>[number],
+  start: number, beatLength: number, getNoise: () => BufferLike | null): void {
+  const duration = note.voice === 'drum' ? note.length : Math.min(note.length * beatLength, 1.5);
+  const gain = context.createGain();
+  const peak = note.strength * (note.voice === 'bass' ? .21 : note.voice === 'drum' ? .12 : .14);
+  setEnvelope(gain.gain, start, duration, peak, note.voice === 'lead' ? .035 : .006);
+  gain.connect(bus);
+  let source: OscillatorNodeLike | BufferSourceNodeLike;
+  let filter: FilterNodeLike | null = null;
+  if (note.voice === 'drum' && context.createBufferSource && context.createBiquadFilter) {
+    const buffer = getNoise();
+    if (!buffer) { gain.disconnect?.(); return; }
+    const drum = context.createBufferSource();
+    drum.buffer = buffer;
+    source = drum;
+    filter = context.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(note.pitch === 1 ? 280 : 1400, start);
+    filter.Q.setValueAtTime(.7, start);
+  } else {
+    const oscillator = context.createOscillator();
+    oscillator.type = 'triangle'; // harmonics keep the bass audible on phone speakers
+    oscillator.frequency.setValueAtTime(note.voice === 'drum' ? 110 : 440 * 2 ** ((note.pitch - 69) / 12), start);
+    source = oscillator;
+  }
+  if (filter) { source.connect(filter); filter.connect(gain); }
+  else source.connect(gain);
+  source.onended = () => { source.disconnect?.(); filter?.disconnect?.(); gain.disconnect?.(); };
+  source.start(start);
+  source.stop(start + duration + .02);
 }
