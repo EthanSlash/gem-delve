@@ -1,15 +1,21 @@
 import { BOARD_SIZE } from '../types';
 import type { Board, GameContent, GemColor, Move, RewardOption, RunState, TurnResult } from '../types';
 import type { Layout, Phase, Rect } from './model';
+import { statCards } from './model';
+import { enemyPose } from './enemy-motion';
 import { drawBackground, drawBoardCell, drawBoardFrame, drawEnemy, drawSelection, drawSprite } from './art';
 import type { Effects, FloatAnchor } from './fx';
+import { titleButtons, TUTORIAL_MOVE, tutorialLayout } from './tutorial';
+import type { Tutorial } from './tutorial';
 
 export interface View {
-  screen: 'title' | 'combat' | 'reward' | 'won' | 'lost';
+  screen: 'title' | 'tutorial' | 'combat' | 'reward' | 'won' | 'lost';
+  tutorial?: Tutorial;
   run: RunState | null;
   board?: Board;
   phase?: Phase;
   progress: number;
+  time: number;
   move?: Move;
   turn?: TurnResult;
   selected?: { row: number; col: number };
@@ -24,7 +30,7 @@ const hues: Record<GemColor, string> = { red: '#e96a60', purple: '#b69ae9', gree
 const labels: Record<GemColor, string> = { red: '紅', purple: '紫', green: '綠', yellow: '黃' };
 const ink = '#f7e8ca';
 
-function box(ctx: CanvasRenderingContext2D, r: Rect, fill = '#252638', border = '#ae8250', radius = 12) {
+function box(ctx: CanvasRenderingContext2D, r: Rect, fill: string | CanvasGradient = '#252638', border = '#ae8250', radius = 12) {
   ctx.fillStyle = fill;
   ctx.strokeStyle = border;
   ctx.lineWidth = 1.5;
@@ -131,9 +137,64 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
     ctx.shadowBlur = 0;
     fittedText(ctx, '交換相鄰寶石，消除三顆以上擊敗敵人', cx, safe.y + safe.h * .49,
       safe.w - 24, Math.max(14, Math.min(16, safe.w * .038)), '#cebca5', 'center');
-    button(ctx, shape.primary);
-    text(ctx, '開始探險', cx, shape.primary.y + shape.primary.h / 2, 22, '#fff4de', 'center', 'bold');
+    const title = titleButtons(shape);
+    button(ctx, title.primary);
+    text(ctx, '開始探險', cx, title.primary.y + title.primary.h / 2, 22, '#fff4de', 'center', 'bold');
+    button(ctx, title.replay, false);
+    text(ctx, '新手教學', cx, title.replay.y + title.replay.h / 2, 16, ink, 'center');
     controls();
+    return;
+  }
+  if (view.tutorial) {
+    const tutorial = view.tutorial, t = tutorialLayout(shape);
+    const step = tutorial.step === 'swap' ? 1 : tutorial.step === 'effects' ? 2 : 3;
+    text(ctx, `新手教學 ${step}／3`, safe.x + 16, safe.y + 30, 20, '#f3cb70', 'left', 'bold');
+    button(ctx, t.skip, false);
+    text(ctx, '略過', t.skip.x + t.skip.w / 2, t.skip.y + 22, 16, ink, 'center');
+    let lineY = t.panel.y + 8;
+    const line = (value: string, _index: number, color = ink) => {
+      ctx.font = 'normal 14px system-ui, sans-serif';
+      let row = '';
+      for (const char of value) {
+        if (row && ctx.measureText(row + char).width > t.panel.w) {
+          text(ctx, row, t.panel.x, lineY, 14, color); lineY += 18; row = '';
+        }
+        row += char;
+      }
+      if (row) { text(ctx, row, t.panel.x, lineY, 14, color); lineY += 18; }
+    };
+    if (tutorial.step === 'swap' || tutorial.step === 'effects') {
+      board(ctx, { ...shape, ...t }, view.phase?.board ?? tutorial.board, view);
+      if (tutorial.step === 'swap') {
+        line('交換亮框兩格，排成三顆紅寶石。', 0);
+        line('可拖曳，也可依序點選兩格。', 1);
+        line(tutorial.hint ? '再試試亮框中的兩格，不會扣血或扣步！' : '相鄰交換，三顆以上同色就能消除。', 2, '#f3cb70');
+        ctx.strokeStyle = '#ffe4a1'; ctx.lineWidth = 3;
+        for (const pos of [TUTORIAL_MOVE.a, TUTORIAL_MOVE.b]) ctx.strokeRect(
+          t.board.x + pos.col * t.cell + 2, t.board.y + pos.row * t.cell + 2, t.cell - 4, t.cell - 4);
+      } else {
+        line('紅攻擊、紫護盾；綠回血、黃金幣。', 0, '#f3cb70');
+        line('有效交換才推進敵人倒數，歸零時攻擊。', 1);
+        line('無效交換不扣步；護盾可以擋傷害。', 2);
+        line('石塊不能交換，消除旁邊寶石即可清除。', 3);
+        button(ctx, t.next);
+        text(ctx, '下一步', t.next.x + t.next.w / 2, t.next.y + 22, 18, ink, 'center');
+      }
+    } else {
+      fittedText(ctx, tutorial.step === 'ready' ? '教學完成！獎勵會強化接下來的冒險。' : '戰鬥勝利後三選一，試著選一張獎勵。',
+        cx, safe.y + 82, safe.w - 32, 16, '#f3cb70', 'center');
+      const examples = [['遺物：守護之盾', '每場戰鬥開始時獲得護盾'], ['強化：紅色寶石', '提升紅寶石消除的傷害'], ['移除：黃色寶石', '減少一種顏色，更容易連鎖']];
+      for (let i = 0; i < t.cards.length; i++) {
+        const card = t.cards[i]!;
+        box(ctx, card, tutorial.reward === i ? '#795033' : '#252638');
+        fittedText(ctx, examples[i]![0]!, card.x + 12, card.y + 15, card.w - 24, 16, ink);
+        fittedText(ctx, examples[i]![1]!, card.x + 12, card.y + 35, card.w - 24, 14, '#cebca5');
+      }
+      if (tutorial.step === 'ready') {
+        button(ctx, t.next);
+        text(ctx, '開始探險', t.next.x + t.next.w / 2, t.next.y + 22, 18, ink, 'center');
+      }
+    }
     return;
   }
   if (!run) return;
@@ -190,54 +251,77 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   if (!combat) return;
   const enemy = content.enemies[run.floor - 1];
   const header = shape.header, stats = shape.stats;
-  box(ctx, { x: header.x - 5, y: header.y - 8, w: header.w + 10,
-    h: shape.landscape ? 106 : 136 });
-  box(ctx, { x: stats.x - 5, y: stats.y - 2, w: stats.w + 10, h: stats.h + 4 });
-  const recoil = view.reduced ? 0 : 5 * view.fx.flash / 200;
-  drawEnemy(ctx, enemy?.id ?? combat.enemy.id, { ...shape.enemy, x: shape.enemy.x + recoil }, view.fx.flash / 200);
   const narrow = shape.landscape && header.w < 180;
-  text(ctx, `第 ${run.floor}／${content.enemies.length} 層`, header.x, header.y + 10, 15, '#f3cb70', 'left', 'bold');
-  text(ctx, enemy?.name ?? '敵人', header.x + (shape.landscape && !narrow ? 64 : 0),
-    header.y + (narrow ? 35 : 35), narrow ? 16 : 20, ink, 'left', 'bold');
+  // A quiet encounter panel keeps the enemy and its intent together.
+  const panel = ctx.createLinearGradient(header.x, header.y, header.x + header.w, header.y + header.h);
+  panel.addColorStop(0, '#28283e'); panel.addColorStop(1, '#171827');
+  box(ctx, header, panel, '#5b4d69');
+  const hero = shape.enemy;
+  const halo = ctx.createRadialGradient(hero.x + hero.w / 2, hero.y + hero.h * .6, 0,
+    hero.x + hero.w / 2, hero.y + hero.h * .6, hero.w * .55);
+  halo.addColorStop(0, enemy?.isBoss ? 'rgba(177,105,232,.24)' : 'rgba(89,195,169,.18)');
+  halo.addColorStop(1, 'rgba(89,195,169,0)');
+  ctx.fillStyle = halo; ctx.fillRect(hero.x, hero.y, hero.w, hero.h);
+  ctx.fillStyle = '#0b101d'; ctx.beginPath();
+  ctx.ellipse(hero.x + hero.w / 2, hero.y + hero.h * .88, hero.w * .34, hero.h * .055, 0, 0, Math.PI * 2); ctx.fill();
+  const pose = enemyPose(enemy?.id ?? combat.enemy.id, { time: view.time, reduced: view.reduced,
+    attackProgress: view.phase?.kind === 'enemy' ? view.progress : undefined, hitFlash: view.fx.flash });
+  ctx.save();
+  // Clip the animated portrait to its own area, including in very short layouts.
+  ctx.beginPath(); ctx.rect(hero.x, hero.y, hero.w, hero.h); ctx.clip();
+  ctx.translate(hero.x + hero.w * (.5 + pose.x), hero.y + hero.h * (.9 + pose.y));
+  ctx.rotate(pose.rotation); ctx.scale(pose.scaleX, pose.scaleY);
+  drawEnemy(ctx, enemy?.id ?? combat.enemy.id, { x: -hero.w / 2, y: -hero.h * .9, w: hero.w, h: hero.h }, pose.glow);
+  ctx.restore();
+  const copyW = narrow ? header.w - 12 : header.w - hero.w - 22;
+  const hx = header.x + 10;
+  text(ctx, narrow ? `${run.floor} / ${content.enemies.length}` : `地城探險   ${run.floor} / ${content.enemies.length}`,
+    hx, header.y + 14, 12, '#c8ac79', 'left', 'bold');
+  fittedText(ctx, enemy?.name ?? '敵人', hx, header.y + (narrow ? 65 : 39), copyW,
+    narrow ? 15 : 22, ink, 'left', 'bold');
   const resolved = view.phase?.kind === 'finish' || (view.phase?.kind === 'enemy' && view.progress > .5);
   const applied = !!view.turn && !!view.phase && view.phase.kind !== 'swap';
   const enemyHp = applied ? view.turn!.state.enemy.hp : combat.enemy.hp;
-  const bar: Rect = { x: header.x + (shape.landscape && !narrow ? 64 : 0), y: header.y + 57,
-    w: header.w - (shape.landscape && !narrow ? 68 : narrow ? shape.enemy.w + 5 : 86), h: 12 };
-  box(ctx, bar, '#231c2a', '#7e5956', 4);
+  const bar: Rect = { x: hx, y: header.y + (narrow ? 77 : 59), w: copyW, h: narrow ? 5 : 8 };
+  ctx.fillStyle = '#100f1d'; ctx.beginPath(); ctx.roundRect(bar.x, bar.y, bar.w, bar.h, 3); ctx.fill();
   const fill = Math.max(0, bar.w - 4) * Math.max(0, enemyHp) / (enemy?.maxHp || 1);
   const trailing = Math.max(0, bar.w - 4) * Math.min(1, Math.max(0, view.fx.trail) / (enemy?.maxHp || 1));
   ctx.fillStyle = '#ffd4bd'; ctx.fillRect(bar.x + 2, bar.y + 2, trailing, bar.h - 4);
-  ctx.fillStyle = '#ad3549'; ctx.fillRect(bar.x + 2, bar.y + 2, fill, bar.h - 4);
-  ctx.fillStyle = '#f58383'; ctx.fillRect(bar.x + 2, bar.y + 2, fill, 2);
+  const healthFill = ctx.createLinearGradient(bar.x, 0, bar.x + bar.w, 0);
+  healthFill.addColorStop(0, '#b13960'); healthFill.addColorStop(1, '#f8898e');
+  ctx.fillStyle = healthFill; ctx.fillRect(bar.x + 2, bar.y + 2, fill, bar.h - 4);
   const countdown = resolved ? view.turn!.state.enemy.countdown : combat.enemy.countdown;
-  const badge: Rect = { x: bar.x, y: header.y + 76, w: Math.min(bar.w, 120), h: 21 };
-  box(ctx, badge, '#302632', '#ae8250', 5);
-  icon(ctx, 'sword', badge.x + 13, badge.y + 10, 15);
-  text(ctx, narrow ? `${countdown}` : `${Math.max(0, enemyHp)}/${enemy?.maxHp ?? 0}  ${countdown} 步`, badge.x + 27, badge.y + 11, 14, '#f3d3b9');
+  const intent = countdown === 1 ? '#ffab8f' : '#d0c1ac';
+  fittedText(ctx, narrow ? `${Math.max(0, enemyHp)} HP · ${countdown}步` : `${Math.max(0, enemyHp)} / ${enemy?.maxHp ?? 0} 生命`,
+    hx, header.y + (narrow ? 89 : shape.landscape ? 75 : 80), copyW, narrow ? 11 : 12, '#c8b8bc');
+  if (!narrow) {
+    const intentY = header.y + (shape.landscape ? 90 : 99);
+    icon(ctx, 'sword', hx + 6, intentY, 13);
+    fittedText(ctx, `${countdown} 步後攻擊`, hx + 19, intentY, copyW - 19, 12, intent, 'left', 'bold');
+  }
   controls();
   const player = resolved ? view.turn!.state.player : applied ? { ...combat.player,
     hp: Math.min(combat.player.maxHp, combat.player.hp + view.turn!.effects.heal),
     gold: combat.player.gold + view.turn!.effects.gold } : combat.player;
   const shield = resolved ? view.turn!.state.shield : combat.shield + (applied ? view.turn!.effects.shield : 0);
-  const statSize = Math.max(14, Math.min(17, stats.w * .048));
   const statItems: [string, 'heart' | 'shield' | 'coin'][] = [[`${player.hp}/${player.maxHp}`, 'heart'], [`${shield}`, 'shield'], [`${player.gold}`, 'coin']];
-  let sx = stats.x;
+  const cards = statCards(shape);
   const anchors: Partial<Record<FloatAnchor, { x: number; y: number }>> = {
     enemy: { x: shape.enemy.x + shape.enemy.w / 2, y: shape.enemy.y + shape.enemy.h / 2 },
   };
   for (const [i, [value, kind]] of statItems.entries()) {
-    if (narrow && i === 1) sx = stats.x;
-    const sy = stats.y + (narrow && i > 0 ? 41 : 17);
-    anchors[kind] = { x: sx + 9, y: sy };
-    icon(ctx, kind, sx + 9, sy, 17);
-    text(ctx, value, sx + 22, sy, statSize, ink, 'left', 'bold');
-    ctx.font = `bold ${statSize}px system-ui, sans-serif`;
-    sx += 30 + ctx.measureText(value).width + (narrow ? 2 : shape.landscape ? 8 : 19);
+    const r = cards[i]!, stacked = stats.w < 180;
+    const color = kind === 'heart' ? '#f09aab' : kind === 'shield' ? '#c5abf1' : '#f2d080';
+    box(ctx, r, '#1b1e30', '#444158', 6);
+    const sy = r.y + r.h / 2;
+    anchors[kind] = { x: r.x + r.w / 2, y: sy };
+    icon(ctx, kind, r.x + 13, sy, stacked ? 13 : 16);
+    if (!stacked) text(ctx, kind === 'heart' ? '生命' : kind === 'shield' ? '護盾' : '金幣', r.x + 27, r.y + 11, 10, '#b3a9ba');
+    fittedText(ctx, value, r.x + (stacked ? 26 : 27), r.y + (stacked ? 10 : 28), r.w - (stacked ? 32 : 33), stacked ? 13 : 18, color, 'left', 'bold');
   }
   const relics = player.relics.map(id => content.relics.find(r => r.id === id)?.name ?? id).join('、');
-  fittedText(ctx, `遺物：${relics || '無'}`, stats.x, stats.y + (narrow ? 68 : 40),
-    stats.w, Math.max(14, Math.min(16, stats.w * .042)), '#d5bc9c');
+  fittedText(ctx, `遺物  ${relics || '尚未獲得'}`, stats.x + 2, stats.y + (stats.w < 180 ? 81 : 56),
+    stats.w - 4, 12, '#b8a68e');
   board(ctx, shape, view.phase?.kind === 'enemy' && view.progress > .5 ? view.turn!.state.board : view.board ?? combat.board, view);
   for (const p of view.fx.particles) {
     ctx.globalAlpha = Math.max(0, 1 - p.age / p.life);
@@ -251,8 +335,10 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   for (let i = 0; i < 4; i++) {
     const x = legend.x + (i % 2) * legend.w / 2;
     const y = legend.y + Math.floor(i / 2) * 25 + 9;
-    drawSprite(ctx, { kind: 'gem', color: items[i]![0] }, x + 10, y, 25);
-    text(ctx, items[i]![1], x + 26, y, Math.max(14, Math.min(16, legend.w * .042)), hues[items[i]![0]]);
+    const compact = legend.w < 180;
+    drawSprite(ctx, { kind: 'gem', color: items[i]![0] }, x + (compact ? 7 : 10), y, compact ? 18 : 25);
+    fittedText(ctx, compact ? items[i]![1].slice(1) : items[i]![1], x + (compact ? 18 : 26), y,
+      legend.w / 2 - (compact ? 18 : 26), compact ? 11 : 14, hues[items[i]![0]]);
   }
   if (view.phase && view.turn) {
     const phase = view.phase;

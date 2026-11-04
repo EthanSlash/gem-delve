@@ -77,6 +77,11 @@ function jewel(ctx: CanvasRenderingContext2D, color: GemColor, size: number) {
   const inner = outer.map(([x, y]): Point => [x * .56, y * .56]);
   const palette = palettes[color];
   ctx.translate(size / 2, size / 2);
+  const shadow = ctx.createRadialGradient(0, r * .7, 0, 0, r * .7, r * 1.3);
+  shadow.addColorStop(0, 'rgba(0,0,0,.65)');
+  shadow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = shadow;
+  ctx.beginPath(); ctx.ellipse(0, r * .7, r * 1.3, r * .6, 0, 0, Math.PI * 2); ctx.fill();
   polygon(ctx, outer);
   ctx.fillStyle = palette.deep;
   ctx.fill();
@@ -94,6 +99,18 @@ function jewel(ctx: CanvasRenderingContext2D, color: GemColor, size: number) {
     ctx.fill();
   }
 
+  // Trace the upper cuts without connecting nonadjacent facets across the gem.
+  ctx.beginPath();
+  for (let i = 0; i < outer.length; i++) {
+    const a = outer[i]!, b = outer[(i + 1) % outer.length]!;
+    if (a[1] <= 0 && b[1] <= 0) {
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+    }
+  }
+  ctx.strokeStyle = palette.light;
+  ctx.lineWidth = Math.max(.7, size * .016);
+  ctx.stroke();
+
   const table = ctx.createLinearGradient(-r * .5, -r * .6, r * .55, r * .65);
   table.addColorStop(0, palette.light);
   table.addColorStop(.46, palette.mid);
@@ -104,6 +121,17 @@ function jewel(ctx: CanvasRenderingContext2D, color: GemColor, size: number) {
   ctx.strokeStyle = palette.deep;
   ctx.lineWidth = Math.max(.5, size * .012);
   ctx.stroke();
+
+  ctx.save();
+  polygon(ctx, inner); ctx.clip();
+  const sheen = ctx.createLinearGradient(-r * .5, -r * .55, r * .5, r * .6);
+  sheen.addColorStop(0, 'rgba(255,255,255,.42)');
+  sheen.addColorStop(.38, 'rgba(255,255,255,.06)');
+  sheen.addColorStop(.4, 'rgba(255,255,255,0)');
+  sheen.addColorStop(.8, 'rgba(255,255,255,.1)');
+  sheen.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sheen; ctx.fillRect(-r, -r * 1.2, r * 2, r * 2.4);
+  ctx.restore();
 
   // A single hard-edged reflection follows the upper left cut rather than a blurry dot.
   polygon(ctx, [[-r * .49, -r * .41], [-r * .18, -r * .68], [r * .05, -r * .57], [-r * .2, -r * .35]]);
@@ -277,18 +305,45 @@ export function drawBackground(ctx: CanvasRenderingContext2D, width: number, hei
 }
 
 export function drawBoardFrame(ctx: CanvasRenderingContext2D, board: Rect) {
-  const x = board.x - 5, y = board.y - 5, w = board.w + 10, h = board.h + 10;
-  ctx.beginPath(); ctx.roundRect(x, y, w, h, 13);
-  ctx.fillStyle = '#181823'; ctx.fill();
-  ctx.strokeStyle = '#ae8250'; ctx.lineWidth = 1.5; ctx.stroke();
-  ctx.beginPath(); ctx.roundRect(x + 2, y + 2, w - 4, h - 4, 10);
-  ctx.strokeStyle = '#363344'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = '#10121d'; ctx.fillRect(board.x, board.y, board.w, board.h);
+  const w = board.w + 10, h = board.h + 10;
+  const image = cachedSprite('board-frame', w, h, scale(ctx), surface => {
+    const metal = surface.createLinearGradient(0, 0, w, h);
+    metal.addColorStop(0, '#e4c28a'); metal.addColorStop(.18, '#8a6445');
+    metal.addColorStop(.47, '#3c3039'); metal.addColorStop(.75, '#8c6745');
+    metal.addColorStop(1, '#d3a768');
+    surface.beginPath(); surface.roundRect(.75, .75, w - 1.5, h - 1.5, 13);
+    surface.fillStyle = metal; surface.fill();
+    surface.strokeStyle = '#edcf94'; surface.lineWidth = 1; surface.stroke();
+    surface.beginPath(); surface.roundRect(3, 3, w - 6, h - 6, 10);
+    surface.fillStyle = '#0c0c16'; surface.fill();
+    surface.strokeStyle = '#211922'; surface.lineWidth = 2; surface.stroke();
+    surface.fillStyle = '#d5b176';
+    for (const x of [3, w - 3]) for (const y of [3, h - 3]) {
+      surface.beginPath(); surface.arc(x, y, 1.1, 0, Math.PI * 2); surface.fill();
+    }
+  });
+  ctx.drawImage(image, board.x - 5, board.y - 5, w, h);
 }
 
 export function drawBoardCell(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, alternate: boolean, selected: boolean) {
-  ctx.fillStyle = alternate ? '#222331' : '#282938';
-  ctx.fillRect(x + 1, y + 1, size - 2, size - 2);
+  const image = cachedSprite(`board-cell:${alternate}`, size, size, scale(ctx), surface => {
+    const inset = Math.max(1, size * .025);
+    const stone = surface.createLinearGradient(0, 0, size, size);
+    stone.addColorStop(0, alternate ? '#111321' : '#161827');
+    stone.addColorStop(.55, alternate ? '#202334' : '#272b3d');
+    stone.addColorStop(1, alternate ? '#303044' : '#36364b');
+    surface.beginPath(); surface.roundRect(inset, inset, size - inset * 2, size - inset * 2, size * .09);
+    surface.fillStyle = stone; surface.fill();
+    surface.strokeStyle = 'rgba(3,4,12,.8)'; surface.lineWidth = 1; surface.stroke();
+    surface.beginPath(); surface.moveTo(inset + 3, size - inset - 1);
+    surface.lineTo(size - inset - 3, size - inset - 1);
+    surface.strokeStyle = 'rgba(175,167,210,.15)'; surface.stroke();
+    const recess = surface.createRadialGradient(size * .5, size * .48, size * .1,
+      size * .5, size * .48, size * .55);
+    recess.addColorStop(0, 'rgba(0,0,0,.24)'); recess.addColorStop(1, 'rgba(0,0,0,0)');
+    surface.fillStyle = recess; surface.fillRect(inset, inset, size - inset * 2, size - inset * 2);
+  });
+  ctx.drawImage(image, x, y, size, size);
   if (selected) {
     ctx.fillStyle = 'rgba(247,194,81,.17)';
     ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
@@ -296,6 +351,12 @@ export function drawBoardCell(ctx: CanvasRenderingContext2D, x: number, y: numbe
 }
 
 export function drawSelection(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
-  ctx.strokeStyle = '#ffe195'; ctx.lineWidth = 3;
-  ctx.strokeRect(x + 3, y + 3, size - 6, size - 6);
+  ctx.save();
+  ctx.shadowColor = '#ffd77b'; ctx.shadowBlur = Math.min(12, size * .2);
+  ctx.strokeStyle = '#ffe6a8'; ctx.lineWidth = Math.max(2, size * .045);
+  ctx.beginPath(); ctx.roundRect(x + 3, y + 3, size - 6, size - 6, size * .1); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,248,224,.75)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x + 5, y + 5, size - 10, size - 10, size * .08); ctx.stroke();
+  ctx.restore();
 }

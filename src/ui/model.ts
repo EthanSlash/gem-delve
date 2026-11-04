@@ -21,16 +21,14 @@ export function layout(width: number, height: number, rewardCount = 3,
   const sideW = landscape ? w - sideX - pad : w - 2 * pad;
   const size = landscape
     ? Math.min(h - pad * 2, w * 0.55, w - pad * 2 - 116)
-    : Math.min(w - pad * 2, Math.max(180, h - 285));
+    : Math.min(w - pad * 2, Math.max(120, h - 328));
   const board: Rect = { x: landscape ? pad + (sideX - 2 * pad - size) / 2 : (w - size) / 2,
-    y: landscape ? (h - size) / 2 : Math.max(193, Math.min(h - size - 57, h * 0.33)), w: size, h: size };
-  const header: Rect = landscape ? { x: sideX, y: pad + 5, w: sideW, h: 92 }
-    : { x: pad, y: 15, w: sideW, h: 92 };
-  const enemySize = landscape ? Math.min(56, Math.max(50, sideW - 54)) : 78;
-  const enemy: Rect = landscape ? { x: sideW < 180 ? w - pad - enemySize : sideX, y: pad + 47, w: enemySize, h: enemySize }
-    : { x: w - pad - enemySize, y: 63, w: enemySize, h: enemySize };
-  const stats: Rect = landscape ? { x: sideX, y: pad + 104, w: sideW, h: 90 }
-    : { x: pad, y: 146, w: sideW, h: 52 };
+    y: landscape ? (h - size) / 2 : Math.max(264, Math.min(h - size - 64, h * 0.33)), w: size, h: size };
+  const header: Rect = { x: landscape ? sideX : pad, y: 54, w: sideW, h: landscape ? 96 : 116 };
+  const enemySize = landscape ? Math.min(90, Math.max(50, sideW * .28)) : 100;
+  const enemy: Rect = { x: w - pad - enemySize, y: landscape ? 56 : 64, w: enemySize, h: enemySize };
+  const stats: Rect = landscape ? { x: sideX, y: 156, w: sideW, h: 90 }
+    : { x: pad, y: 184, w: sideW, h: 64 };
   const legend: Rect = landscape ? { x: sideX, y: stats.y + stats.h + 12, w: sideW, h: 58 }
     : { x: pad, y: board.y + size + 10, w: sideW, h: 52 };
   const mute: Rect = { x: w - pad - 48, y: 4, w: 48, h: 44 };
@@ -57,6 +55,20 @@ export function layout(width: number, height: number, rewardCount = 3,
 
 export function contains(rect: Rect, x: number, y: number): boolean {
   return x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h;
+}
+
+// Keep stat widths independent of their values, so large gold/shield totals cannot
+// push neighboring information out of the safe area.
+export function statCards(shape: Layout): Rect[] {
+  const { stats } = shape;
+  const stacked = stats.w < 180;
+  const gap = stacked ? 3 : 6;
+  return Array.from({ length: 3 }, (_, i) => ({
+    x: stats.x + (stacked ? 0 : i * (stats.w + gap) / 3),
+    y: stats.y + (stacked ? i * 23 : 0),
+    w: stacked ? stats.w : (stats.w - gap * 2) / 3,
+    h: stacked ? 20 : 42,
+  }));
 }
 
 export function hitCell(shape: Layout, x: number, y: number): Pos | null {
@@ -103,19 +115,19 @@ export function sameBoard(a: Board, b: Board): boolean {
 
 export function buildTimeline(initial: Board, result: TurnResult): Phase[] {
   if (!result.valid) return [];
-  const phases: Phase[] = [{ kind: 'swap', board: initial, duration: 135 }];
+  const phases: Phase[] = [{ kind: 'swap', board: initial, duration: 90 }];
   for (const step of result.steps) {
-    phases.push({ kind: 'clear', board: step.boardAfterClear, duration: 160, chain: step.chain, groups: step.groups });
-    phases.push({ kind: 'fall', board: step.boardAfter, duration: 175, chain: step.chain,
+    phases.push({ kind: 'clear', board: step.boardAfterClear, duration: 110, chain: step.chain, groups: step.groups });
+    phases.push({ kind: 'fall', board: step.boardAfter, duration: 120, chain: step.chain,
       dropRows: fallDistances(step.boardAfterClear) });
   }
   if (result.enemyAction) phases.push({ kind: 'enemy',
-    board: result.reshuffled ? result.state.board : phases[phases.length - 1]!.board, duration: 250 });
+    board: result.reshuffled ? result.state.board : phases[phases.length - 1]!.board, duration: 180 });
   const last = phases[phases.length - 1]!.board;
-  phases.push({ kind: 'finish', board: result.state.board, duration: sameBoard(last, result.state.board) ? 100 : 210,
+  phases.push({ kind: 'finish', board: result.state.board, duration: sameBoard(last, result.state.board) ? 60 : 140,
     reshuffled: result.reshuffled || !!result.enemyAction?.reshuffled });
   // Long cascades remain snappy while retaining every snapshot.
   const total = phases.reduce((n, phase) => n + phase.duration, 0);
-  if (total > 1750) for (const phase of phases) phase.duration = phase.duration * 1750 / total;
+  if (total > 1200) for (const phase of phases) phase.duration = phase.duration * 1200 / total;
   return phases;
 }

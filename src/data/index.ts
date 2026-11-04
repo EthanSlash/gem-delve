@@ -2,11 +2,11 @@ import type { GameContent } from '../types';
 
 export const GAME_CONTENT: GameContent = {
   enemies: [
-    { id: 'slime', name: '史萊姆', maxHp: 120, attack: 17, countdown: 2, junkPerAction: 1, isBoss: false },
-    { id: 'caveBat', name: '洞穴蝙蝠', maxHp: 210, attack: 25, countdown: 2, junkPerAction: 1, isBoss: false },
-    { id: 'skeleton', name: '骷髏戰士', maxHp: 300, attack: 30, countdown: 2, junkPerAction: 2, isBoss: false },
-    { id: 'gargoyle', name: '石像鬼', maxHp: 390, attack: 36, countdown: 2, junkPerAction: 2, isBoss: false },
-    { id: 'slimeKing', name: '史萊姆王', maxHp: 480, attack: 44, countdown: 2, junkPerAction: 3, isBoss: true },
+    { id: 'slime', name: '史萊姆', maxHp: 110, attack: 17, countdown: 2, junkPerAction: 1, isBoss: false },
+    { id: 'caveBat', name: '洞穴蝙蝠', maxHp: 190, attack: 25, countdown: 2, junkPerAction: 1, isBoss: false },
+    { id: 'skeleton', name: '骷髏戰士', maxHp: 270, attack: 30, countdown: 2, junkPerAction: 2, isBoss: false },
+    { id: 'gargoyle', name: '石像鬼', maxHp: 350, attack: 36, countdown: 2, junkPerAction: 2, isBoss: false },
+    { id: 'slimeKing', name: '史萊姆王', maxHp: 430, attack: 44, countdown: 2, junkPerAction: 3, isBoss: true },
   ],
   relics: [
     {
@@ -59,12 +59,12 @@ export const GAME_CONTENT: GameContent = {
     },
   ],
   balance: {
-    playerMaxHp: 60,
-    perGem: { red: 3, purple: 1, green: 1, yellow: 1 },
+    playerMaxHp: 70,
+    perGem: { red: 4, purple: 1, green: 1, yellow: 1 },
     chainBonus: 0.25,
     levelBonus: 0.25,
     rewardOptionCount: 3,
     rerollCost: 15,
-    healAfterCombat: 0.1,
+    healAfterCombat: 0.15,
   },
 };

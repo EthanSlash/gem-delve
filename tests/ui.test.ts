@@ -1,9 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { buildTimeline, dragMove, fallDistances, hitCell, layout, neighboringMove, sameBoard } from '../src/ui/model';
+import { buildTimeline, dragMove, fallDistances, hitCell, layout, neighboringMove, sameBoard, statCards } from '../src/ui/model';
 import type { Rect } from '../src/ui/model';
 import type { Board, TurnResult } from '../src/types';
 
 describe('canvas geometry and input', () => {
+  it('keeps fixed stat cards separate and within the stat tray at every responsive size', () => {
+    for (const [width, height] of [[320,320], [360,640], [390,844], [844,390], [1024,768]]) {
+      const shape = layout(width!, height!), cards = statCards(shape);
+      for (const card of cards) {
+        expect(card.x).toBeGreaterThanOrEqual(shape.stats.x);
+        expect(card.y).toBeGreaterThanOrEqual(shape.stats.y);
+        expect(card.x + card.w - shape.stats.x - shape.stats.w).toBeLessThanOrEqual(1e-6);
+        expect(card.y + card.h).toBeLessThanOrEqual(shape.stats.y + shape.stats.h - 16);
+      }
+      for (let i = 1; i < cards.length; i++) {
+        const a = cards[i - 1]!, b = cards[i]!;
+        expect(a.x + a.w <= b.x || a.y + a.h <= b.y).toBe(true);
+      }
+    }
+  });
   it('keeps enemy art on canvas and clear of the board, stats, and mute control', () => {
     const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && a.x + a.w > b.x &&
       a.y < b.y + b.h && a.y + a.h > b.y;
@@ -136,14 +151,23 @@ describe('turn timeline', () => {
     expect(phases.map(p => p.board)).toEqual([board, cleared, refill, refill, final]);
     expect(phases[2]?.dropRows).toEqual([[1]]);
     expect(phases.at(-1)?.reshuffled).toBe(true);
-    expect(phases.reduce((n, p) => n + p.duration, 0)).toBeLessThan(2000);
+    expect(phases.reduce((n, p) => n + p.duration, 0)).toBe(640);
+    const ordinary = buildTimeline(board, { ...result, enemyAction: null,
+      state: { ...result.state, board: refill } });
+    expect(ordinary.map(p => p.kind)).toEqual(['swap', 'clear', 'fall', 'finish']);
+    expect(ordinary.reduce((n, p) => n + p.duration, 0)).toBe(380);
     expect(sameBoard(board, [[{ kind: 'gem', color: 'red' }]])).toBe(true);
     expect(sameBoard(board, final)).toBe(false);
     const long = buildTimeline(board, { ...result, steps: Array.from({ length: 12 }, (_, i) => ({
       chain: i + 1, groups: [], clearedJunk: [], boardAfterClear: cleared, boardAfter: refill,
     })) });
-    expect(long.filter(p => p.kind === 'clear').length).toBe(12);
-    expect(long.reduce((n, p) => n + p.duration, 0)).toBeLessThanOrEqual(1751);
+    expect(long.filter(p => p.kind === 'clear').map(p => p.chain)).toEqual(
+      Array.from({ length: 12 }, (_, i) => i + 1));
+    expect(long.filter(p => p.kind === 'fall').map(p => p.board)).toEqual(Array(12).fill(refill));
+    expect(long.at(-2)?.kind).toBe('enemy');
+    expect(long.at(-1)?.board).toBe(final);
+    expect(long.every(p => p.duration > 0)).toBe(true);
+    expect(long.reduce((n, p) => n + p.duration, 0)).toBeCloseTo(1200, 8);
   });
   it('marks the finish phase for player reshuffles even when the enemy acts', () => {
     const board: Board = [[{ kind: 'gem', color: 'red' }]];

@@ -6,6 +6,9 @@ import type { Move, MusicTrack, Pos, RunState, RunTurnResult } from '../types';
 import { draw } from './draw';
 import type { View } from './draw';
 import { Effects } from './fx';
+import { shouldAnimateEnemy } from './enemy-motion';
+import { advanceTutorial, createTutorial, finishTutorial, titleButtons, tutorialLayout, tutorialMove, tutorialReward, tutorialSeen } from './tutorial';
+import type { Tutorial } from './tutorial';
 import { buildTimeline, contains, dragMove, hitCell, layout, neighboringMove } from './model';
 import type { Insets, Layout, Phase } from './model';
 
@@ -31,6 +34,8 @@ export function startGame(canvas: HTMLCanvasElement) {
   const parsed = requested === null ? NaN : Number(requested);
   let nextSeed = requested !== null && requested.trim() !== '' && Number.isSafeInteger(parsed) ? parsed >>> 0 : freshSeed();
   let run: RunState | null = null;
+  let tutorial: Tutorial | undefined;
+  let seenTutorial = (() => { try { return tutorialSeen(localStorage); } catch { return false; } })();
   let screen: View['screen'] = 'title';
   let currentMusic: MusicTrack = 'title';
   audio.setMusic(currentMusic);
@@ -44,6 +49,7 @@ export function startGame(canvas: HTMLCanvasElement) {
   let selected: Pos | undefined;
   let press: { pos: Pos; x: number; y: number; id: number } | null = null;
   let animation: { result: RunTurnResult; phases: Phase[]; move: Move; start: number; last: number } | null = null;
+  let tutorialAnimation: { phases: Phase[]; move: Move; start: number; last: number; next: Tutorial } | null = null;
   let invalidUntil = 0;
   let raf = 0;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -62,7 +68,7 @@ export function startGame(canvas: HTMLCanvasElement) {
   }
 
   function schedule() {
-    if (!raf) { lastFrame = performance.now(); raf = requestAnimationFrame(frame); }
+    if (!raf && !document.hidden) { lastFrame = performance.now(); raf = requestAnimationFrame(frame); }
   }
 
   function resize() {
@@ -101,6 +107,7 @@ export function startGame(canvas: HTMLCanvasElement) {
 
   function frame(time: number) {
     raf = 0;
+    if (document.hidden) return;
     fx.update(time - lastFrame);
     lastFrame = time;
     if (animation) {
@@ -124,17 +131,31 @@ export function startGame(canvas: HTMLCanvasElement) {
         animation = null;
       }
     }
+    if (tutorialAnimation) {
+      const elapsed = time - tutorialAnimation.start;
+      let offset = 0;
+      for (let i = 0; i < tutorialAnimation.phases.length; i++) {
+        const phase = tutorialAnimation.phases[i]!;
+        if (elapsed >= offset && i > tutorialAnimation.last) {
+          if (phase.kind === 'clear') audio.play('match', phase.chain);
+          tutorialAnimation.last = i;
+        }
+        offset += phase.duration;
+      }
+      if (elapsed >= offset) { tutorial = tutorialAnimation.next; tutorialAnimation = null; }
+    }
     render(time);
-    if (animation || time < invalidUntil || !fx.idle) raf = requestAnimationFrame(frame);
+    if (animation || tutorialAnimation || time < invalidUntil || !fx.idle || shouldAnimateEnemy(screen, reduced, document.hidden)) raf = requestAnimationFrame(frame);
   }
 
   function render(now = performance.now()) {
     if (!shape) return;
     let phase: Phase | undefined, progress = 0;
-    if (animation) {
-      const elapsed = Math.max(0, now - animation.start);
+    const activeAnimation = animation ?? tutorialAnimation;
+    if (activeAnimation) {
+      const elapsed = Math.max(0, now - activeAnimation.start);
       let offset = 0;
-      for (const item of animation.phases) {
+      for (const item of activeAnimation.phases) {
         phase = item;
         if (elapsed < offset + item.duration) { progress = Math.min(1, (elapsed - offset) / item.duration); break; }
         offset += item.duration;
@@ -143,20 +164,48 @@ export function startGame(canvas: HTMLCanvasElement) {
     ctx!.save();
     if (!reduced && fx.shake) ctx!.translate(Math.sin(fx.shake * .09) * 6 * fx.shake / 250, 0);
     draw(ctx!, shape, {
-      screen, run, board: phase?.board ?? run?.combat?.board, phase, progress,
-      move: animation?.move, turn: animation?.result.turn, selected,
-      shake: now < invalidUntil ? (invalidUntil - now) / 260 : 0,
+      time: now, screen, run, board: phase?.board ?? run?.combat?.board, phase, progress,
+      move: activeAnimation?.move, turn: animation?.result.turn, selected,
+      shake: now < invalidUntil ? (invalidUntil - now) / 160 : 0,
+      tutorial,
       muted: audio.isMuted(), musicMuted: audio.isMusicMuted(), reduced, fx,
     }, GAME_CONTENT);
     ctx!.restore();
   }
 
+  function startRun() {
+    tutorial = undefined;
+    run = createRun(nextSeed, GAME_CONTENT); nextSeed = freshSeed(); screen = 'combat';
+    updateMusic(); selected = undefined; press = null; fx.reset(); audio.play('select'); render();
+    if (shouldAnimateEnemy(screen, reduced, document.hidden)) schedule();
+  }
+  function beginTutorial() {
+    tutorial = createTutorial(); screen = 'tutorial'; selected = undefined; press = null;
+    fx.reset(); updateMusic(); render();
+  }
+  function completeTutorial() {
+    seenTutorial = true;
+    try { finishTutorial(localStorage); } catch { /* Storage getter may be unavailable. */ }
+    startRun();
+  }
   function play(move: Move) {
+    if (tutorialAnimation) return;
+    if (tutorial) {
+      const next = tutorialMove(tutorial, move);
+      if (next.step !== tutorial.step && next.result) {
+        const formal = createRun(0, GAME_CONTENT).combat!;
+        const turn = { ...next.result, effects: { damage: 0, shield: 0, heal: 0, gold: 0 },
+          reshuffled: next.result.reshuffled, enemyAction: null, state: { ...formal, board: next.board } };
+        tutorialAnimation = { phases: buildTimeline(tutorial.board, turn), move, start: performance.now(), last: -1, next };
+        schedule();
+      } else tutorial = next;
+      selected = undefined; render(); return;
+    }
     if (!run || screen !== 'combat' || animation || performance.now() < invalidUntil) return;
     const result = playMove(run, move, GAME_CONTENT);
     selected = undefined;
     if (!result.turn.valid) {
-      audio.play('invalid'); invalidUntil = performance.now() + 260;
+      audio.play('invalid'); invalidUntil = performance.now() + 160;
       schedule();
       return;
     }
@@ -170,6 +219,7 @@ export function startGame(canvas: HTMLCanvasElement) {
     if (next === run) return;
     run = next; screen = run.status; updateMusic(); selected = undefined; fx.reset();
     audio.play('reward'); render();
+    if (shouldAnimateEnemy(screen, reduced, document.hidden)) schedule();
   }
 
   function point(event: PointerEvent) {
@@ -180,9 +230,10 @@ export function startGame(canvas: HTMLCanvasElement) {
 
   canvas.addEventListener('pointerdown', event => {
     if (press && press.id !== event.pointerId) return;
-    if (animation || performance.now() < invalidUntil) return;
+    if (animation || tutorialAnimation || performance.now() < invalidUntil) return;
     const p = point(event);
-    const pos = screen === 'combat' ? hitCell(shape, p.x, p.y) : null;
+    const inputShape = tutorial ? { ...shape, ...tutorialLayout(shape) } : shape;
+    const pos = screen === 'combat' || tutorial?.step === 'swap' ? hitCell(inputShape, p.x, p.y) : null;
     press = pos ? { pos, x: p.x, y: p.y, id: event.pointerId } : null;
     if (pos) canvas.setPointerCapture(event.pointerId);
   });
@@ -192,8 +243,26 @@ export function startGame(canvas: HTMLCanvasElement) {
   canvas.addEventListener('pointerup', event => {
     if (press && press.id !== event.pointerId) return;
     if (!unlocked) { unlocked = true; audio.unlock(); }
-    if (animation || performance.now() < invalidUntil) { press = null; return; }
     const p = point(event);
+    if (tutorial && contains(tutorialLayout(shape).skip, p.x, p.y)) { tutorialAnimation = null; completeTutorial(); return; }
+    if (animation || tutorialAnimation || performance.now() < invalidUntil) { press = null; return; }
+    if (tutorial) {
+      const t = tutorialLayout(shape);
+      if (tutorial.step === 'ready' && contains(t.next, p.x, p.y)) { completeTutorial(); return; }
+      if (tutorial.step === 'effects' && contains(t.next, p.x, p.y)) { tutorial = advanceTutorial(tutorial); render(); press = null; return; }
+      if (tutorial.step === 'reward') {
+        const index = t.cards.findIndex(card => contains(card, p.x, p.y));
+        tutorial = tutorialReward(tutorial, index); render(); press = null; return;
+      }
+      if (tutorial.step === 'swap' && press?.id === event.pointerId) {
+        const dragging = dragMove(press.pos, p.x - press.x, p.y - press.y, t.cell * .22);
+        const pos = hitCell({ ...shape, ...t }, p.x, p.y);
+        const move = dragging || (selected && pos ? neighboringMove(selected, pos) : null);
+        if (move) play(move);
+        else if (pos) { selected = pos; render(); }
+      }
+      press = null; return;
+    }
     if (contains(shape.mute, p.x, p.y)) {
       audio.setMuted(!audio.isMuted()); savePreference('gemDelve.effectsMuted', audio.isMuted()); render(); press = null; return;
     }
@@ -201,9 +270,9 @@ export function startGame(canvas: HTMLCanvasElement) {
       audio.setMusicMuted(!audio.isMusicMuted()); savePreference('gemDelve.musicMuted', audio.isMusicMuted()); render(); press = null; return;
     }
     if (screen === 'title' || screen === 'won' || screen === 'lost') {
-      if (contains(shape.primary, p.x, p.y)) {
-        run = createRun(nextSeed, GAME_CONTENT); nextSeed = freshSeed(); screen = 'combat'; updateMusic(); selected = undefined; fx.reset();
-        audio.play('select'); render();
+      if (screen === 'title' && contains(titleButtons(shape).replay, p.x, p.y)) beginTutorial();
+      else if (contains(screen === 'title' ? titleButtons(shape).primary : shape.primary, p.x, p.y)) {
+        if (!seenTutorial) beginTutorial(); else startRun();
       }
     } else if (screen === 'reward' && run) {
       const i = shape.cards.findIndex(r => contains(r, p.x, p.y));
@@ -242,6 +311,7 @@ export function startGame(canvas: HTMLCanvasElement) {
     if (unlocked) audio.unlock();
     resize();
     const now = performance.now();
+    if (tutorialAnimation) tutorialAnimation.start = now - tutorialAnimation.phases.reduce((sum, phase) => sum + phase.duration, 0);
     if (animation) {
       animation.start = now - animation.phases.reduce((total, phase) => total + phase.duration, 0);
       animation.last = animation.phases.length - 1;
@@ -254,9 +324,11 @@ export function startGame(canvas: HTMLCanvasElement) {
   if (import.meta.env.DEV) {
     Object.assign(window, { __gemDelve: {
       getRun: () => run,
+      getTutorial: () => tutorial,
+      getScreen: () => screen,
       getMusic: () => currentMusic,
       getValidMoves: () => run?.status === 'combat' && run.combat ? findValidMoves(run.combat.board) : [],
-      play, chooseReward: pickReward, isAnimating: () => animation !== null || performance.now() < invalidUntil,
+      play, chooseReward: pickReward, isAnimating: () => animation !== null || tutorialAnimation !== null || performance.now() < invalidUntil,
     } });
   }
 }
