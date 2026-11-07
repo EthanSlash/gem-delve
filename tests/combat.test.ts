@@ -15,12 +15,12 @@ const board = (color: GemColor = 'red', size = 3): Board => {
   return b;
 };
 const player = (): PlayerState => ({ hp: 20, maxHp: 30, gold: 0, colors: [...colors], colorLevels: { red: 0, purple: 0, green: 0, yellow: 0 }, relics: [] });
-const enemy = (): EnemyDef => ({ id: 'enemy', name: 'enemy', maxHp: 500, attack: 8, countdown: 3, junkPerAction: 0, isBoss: false });
+const enemy = (): EnemyDef => ({ id: 'enemy', name: 'enemy', maxHp: 500, attack: 8, countdown: 3, junkPerAction: 0, isBoss: false, abilities: [], trait: '' });
 const content = (): GameContent => ({
   enemies: [enemy()], relics: [],
   balance: { playerMaxHp: 30, perGem: { red: 2, purple: 2, green: 2, yellow: 2 }, chainBonus: 0.5, levelBonus: 0.25, rewardOptionCount: 3, rerollCost: 1, healAfterCombat: 0 },
 });
-const state = (b = board()): CombatState => ({ board: b, player: player(), shield: 0, enemy: { id: 'enemy', hp: 500, countdown: 3 }, turn: 0, status: 'ongoing', rngState: 0 });
+const state = (b = board()): CombatState => ({ board: b, player: player(), shield: 0, enemy: { id: 'enemy', hp: 500, countdown: 3, regenerated: false, enraged: false }, turn: 0, status: 'ongoing', rngState: 0 });
 function equip(s: CombatState, c: GameContent, effects: RelicEffect[]): void {
   s.player.relics.push('relic');
   c.relics.push({ id: 'relic', name: 'relic', description: '', effects });
@@ -52,7 +52,7 @@ describe('combat', () => {
     const before = structuredClone(p), rng = core.createRng(42);
     const expectedBoard = core.createBoard(rng, p.colors);
     const result = api.createCombat(p, c.enemies[0]!, c, 42);
-    expect(result).toEqual({ board: expectedBoard, player: before, shield: 7, enemy: { id: 'enemy', hp: 500, countdown: 1 }, turn: 0, status: 'ongoing', rngState: rng.state() });
+    expect(result).toEqual({ board: expectedBoard, player: before, shield: 7, enemy: { id: 'enemy', hp: 500, countdown: 1, regenerated: false, enraged: false }, turn: 0, status: 'ongoing', rngState: rng.state() });
     expect(p).toEqual(before);
     expect(api.createCombat(p, c.enemies[0]!, c, 42)).toEqual(result);
     expect(() => api.createCombat({ ...p, relics: ['missing'] }, c.enemies[0]!, c, 1)).toThrow();
@@ -126,7 +126,7 @@ describe('combat', () => {
       s.shield = shield; s.enemy.countdown = 1;
       equip(s, c, ratios.map(ratio => ({ type: 'shieldRetain', ratio })));
       const result = api.applyTurn(s, move, c);
-      expect(result.enemyAction).toEqual({ attack: 8, shieldAbsorbed: absorbed, hpLost, junkAdded: 0, reshuffled: false });
+      expect(result.enemyAction).toEqual({ attack: 8, shieldAbsorbed: absorbed, hpLost, goldStolen: 0, junkAdded: 0, reshuffled: false });
       expect(result.state.shield).toBe(remaining);
       expect(result.state.player.hp).toBe(20 - hpLost);
     }
@@ -137,7 +137,7 @@ describe('combat', () => {
     s.shield = 3; s.enemy.countdown = 1;
     equip(s, c, [{ type: 'enemyAttack', multiplier: 0.7 }]);
     const result = api.applyTurn(s, move, c);
-    expect(result.enemyAction).toEqual({ attack: 5, shieldAbsorbed: 3, hpLost: 2, junkAdded: 0, reshuffled: false });
+    expect(result.enemyAction).toEqual({ attack: 5, shieldAbsorbed: 3, hpLost: 2, goldStolen: 0, junkAdded: 0, reshuffled: false });
     expect(result.state.player.hp).toBe(18);
     expect(result.state.shield).toBe(0);
   });
@@ -149,7 +149,7 @@ describe('combat', () => {
     s.player.relics.push('second');
     c.relics.push({ id: 'second', name: '', description: '', effects: [{ type: 'enemyAttack', multiplier: 1.5 }] });
     const result = api.applyTurn(s, move, c);
-    expect(result.enemyAction).toEqual({ attack: 8, shieldAbsorbed: 6, hpLost: 2, junkAdded: 0, reshuffled: false });
+    expect(result.enemyAction).toEqual({ attack: 8, shieldAbsorbed: 6, hpLost: 2, goldStolen: 0, junkAdded: 0, reshuffled: false });
     expect(result.state.player.hp).toBe(18);
   });
 
@@ -193,7 +193,7 @@ describe('combat', () => {
     const s = state(), c = content(); single(s);
     const before = structuredClone(s), oldContent = structuredClone(c), oldMove = structuredClone(move);
     const invalid = { a: { row: -1, col: 0 }, b: { row: 0, col: 0 } };
-    const empty = { valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: false, enemyAction: null, state: s };
+    const empty = { valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, enemyEvents: { armorBlocked: 0, regenerated: 0, enraged: false }, reshuffled: false, enemyAction: null, state: s };
     expect(api.applyTurn(s, invalid, c)).toEqual(empty);
     for (const status of ['won', 'lost'] as const) {
       const finished = { ...s, status };
@@ -203,5 +203,104 @@ describe('combat', () => {
     expect(s).toEqual(before); expect(c).toEqual(oldContent); expect(move).toEqual(oldMove);
     expect(() => api.applyTurn({ ...s, enemy: { ...s.enemy, id: 'missing' } }, move, c)).toThrow();
     expect(() => api.applyTurn({ ...s, player: { ...s.player, relics: ['missing'] } }, move, c)).toThrow();
+  });
+});
+
+describe('special gem values', () => {
+  it('values blasted gems by chain and level, without big-match multipliers or color flats', () => {
+    const s = state(), c = content();
+    s.player.colorLevels.green = 2;
+    equip(s, c, [{ type: 'bigMatch', minSize: 1, multiplier: 10 }, { type: 'colorFlat', color: 'green', flat: 50 }]);
+    s.board[3]![5] = { kind: 'gem', color: 'red', special: 'row' };
+    // Match the special by making column 5 red at rows 2..4.
+    s.board[2]![5] = gem('red'); s.board[4]![4] = gem('red'); s.board[4]![5] = gem('purple');
+    const swapMove: Move = { a: { row: 4, col: 4 }, b: { row: 4, col: 5 } };
+    const preview = core.applyMove(s.board, swapMove, core.createRng(0), s.player.colors);
+    expect(preview.valid).toBe(true);
+    const result = api.applyTurn(s, swapMove, c);
+    const expected = { damage: 0, shield: 0, heal: 0, gold: 0 };
+    const field = { red: 'damage', purple: 'shield', green: 'heal', yellow: 'gold' } as const;
+    for (const step of result.steps) {
+      const chain = 1 + 0.5 * (step.chain - 1);
+      for (const group of step.groups) expected[field[group.color]] += Math.floor(group.cells.length * 2 * chain
+        * (1 + 0.25 * s.player.colorLevels[group.color]) * 10) + (group.color === 'green' ? 50 : 0);
+      for (const group of step.blasted) expected[field[group.color]] += Math.floor(group.cells.length * 2 * chain
+        * (1 + 0.25 * s.player.colorLevels[group.color]));
+    }
+    expect(result.steps[0]!.blasts.length).toBeGreaterThan(0);
+    expect(result.steps[0]!.blasted.length).toBeGreaterThan(0);
+    expect(result.effects).toEqual(expected);
+  });
+});
+
+describe('enemy abilities', () => {
+  const withAbility = (abilities: EnemyDef['abilities'], tweak: Partial<EnemyDef> = {}) => {
+    const c = content();
+    c.enemies[0] = { ...c.enemies[0]!, abilities, ...tweak };
+    return c;
+  };
+
+  it('armor reduces each turn of damage and reports what it blocked', () => {
+    const c = withAbility([{ type: 'armor', amount: 4 }]);
+    const s = state(); single(s);
+    const result = api.applyTurn(s, move, c);
+    expect(result.effects.damage).toBe(2);
+    expect(result.enemyEvents.armorBlocked).toBe(4);
+    expect(result.state.enemy.hp).toBe(498);
+    const blocked = withAbility([{ type: 'armor', amount: 50 }]);
+    const all = api.applyTurn(s, move, blocked);
+    expect([all.effects.damage, all.enemyEvents.armorBlocked, all.state.enemy.hp]).toEqual([0, 6, 500]);
+  });
+
+  it('regenerates once when damage crosses the threshold, but not on a kill', () => {
+    const c = withAbility([{ type: 'regenerate', threshold: 0.5, healRatio: 0.25 }]);
+    const s = state(); single(s);
+    s.enemy.hp = 255;
+    const first = api.applyTurn(s, move, c);
+    expect(first.state.enemy.hp).toBe(249 + 125);
+    expect(first.enemyEvents.regenerated).toBe(125);
+    expect(first.state.enemy.regenerated).toBe(true);
+    const again = api.applyTurn({ ...first.state, enemy: { ...first.state.enemy, hp: 200 }, board: s.board, rngState: s.rngState }, move, c);
+    expect(again.enemyEvents.regenerated).toBe(0);
+    const kill = api.applyTurn({ ...s, enemy: { ...s.enemy, hp: 6 } }, move, c);
+    expect(kill.state.status).toBe('won');
+    expect(kill.enemyEvents.regenerated).toBe(0);
+  });
+
+  it('steals gold on each attack, never more than the player has', () => {
+    const c = withAbility([{ type: 'stealGold', amount: 5 }]);
+    for (const [gold, stolen] of [[3, 3], [12, 5]] as const) {
+      const s = state(); single(s);
+      s.player.gold = gold; s.enemy.countdown = 1;
+      const result = api.applyTurn(s, move, c);
+      expect(result.enemyAction?.goldStolen).toBe(stolen);
+      expect(result.state.player.gold).toBe(gold - stolen);
+    }
+  });
+
+  it('adds hard junk when the enemy has hardJunk', () => {
+    const c = withAbility([{ type: 'hardJunk' }], { junkPerAction: 3 });
+    const s = state(); single(s);
+    s.enemy.countdown = 1;
+    const result = api.applyTurn(s, move, c);
+    const hard = result.state.board.flat().filter(cell => cell?.kind === 'junk' && cell.hard).length;
+    expect(result.enemyAction?.junkAdded).toBeGreaterThan(0);
+    expect(hard).toBe(result.enemyAction?.junkAdded);
+  });
+
+  it('enrages below the threshold: shorter countdown now and later, and extra junk', () => {
+    const c = withAbility([{ type: 'enrage', threshold: 0.5, countdownDelta: -1, junkBonus: 2 }]);
+    const s = state(); single(s);
+    s.enemy.hp = 253;
+    const first = api.applyTurn(s, move, c);
+    expect(first.enemyEvents.enraged).toBe(true);
+    expect(first.state.enemy.enraged).toBe(true);
+    expect(first.state.enemy.countdown).toBe(1);
+    expect(first.enemyAction).toBeNull();
+    const next = { ...first.state, board: s.board, rngState: s.rngState };
+    const second = api.applyTurn(next, move, c);
+    expect(second.enemyEvents.enraged).toBe(false);
+    expect(second.enemyAction?.junkAdded).toBe(2);
+    expect(second.state.enemy.countdown).toBe(2);
   });
 });

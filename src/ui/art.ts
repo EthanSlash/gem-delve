@@ -1,4 +1,4 @@
-import type { Cell, GemColor } from '../types';
+import type { Cell, GemColor, SpecialKind } from '../types';
 import type { Rect } from './model';
 
 type Point = [number, number];
@@ -185,12 +185,74 @@ function rock(ctx: CanvasRenderingContext2D, size: number) {
   }
 }
 
+// Drawn on top of a jewel, with the context already centered on it.
+function specialMark(ctx: CanvasRenderingContext2D, special: SpecialKind, size: number) {
+  const r = size * .31;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(18,12,28,.9)';
+  ctx.lineWidth = Math.max(1, size * .022);
+  if (special === 'row' || special === 'col') {
+    if (special === 'col') ctx.rotate(Math.PI / 2);
+    // A double-headed arrow along the direction the blast travels.
+    polygon(ctx, [[-r * 1.12, 0], [-r * .68, -r * .34], [-r * .68, -r * .12], [r * .68, -r * .12], [r * .68, -r * .34],
+      [r * 1.12, 0], [r * .68, r * .34], [r * .68, r * .12], [-r * .68, r * .12], [-r * .68, r * .34]]);
+    ctx.fillStyle = 'rgba(255,252,240,.95)'; ctx.fill(); ctx.stroke();
+  } else if (special === 'bomb') {
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.2, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,226,150,.95)'; ctx.lineWidth = Math.max(1.5, size * .055); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, r * .42, 0, Math.PI * 2);
+    ctx.fillStyle = '#1c1526'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,240,205,.95)'; ctx.lineWidth = Math.max(1, size * .025); ctx.stroke();
+    polygon(ctx, [[r * .2, -r * .62], [r * .32, -r * .36], [r * .58, -r * .3], [r * .36, -r * .14], [r * .42, r * .12],
+      [r * .2, -r * .02], [-r * .02, r * .12], [r * .06, -r * .14], [-r * .16, -r * .3], [r * .1, -r * .36]]);
+    ctx.fillStyle = '#ffd36b'; ctx.fill();
+  } else {
+    const ring = ctx.createLinearGradient(-r, -r, r, r);
+    for (const [stop, color] of [[0, '#ff8a80'], [.33, '#ffe07a'], [.66, '#86e3ad'], [1, '#b49cff']] as const) ring.addColorStop(stop, color);
+    ctx.beginPath(); ctx.arc(0, 0, r * 1.18, 0, Math.PI * 2);
+    ctx.strokeStyle = ring; ctx.lineWidth = Math.max(1.5, size * .06); ctx.stroke();
+    polygon(ctx, [[0, -r * .82], [r * .2, -r * .2], [r * .82, 0], [r * .2, r * .2], [0, r * .82], [-r * .2, r * .2],
+      [-r * .82, 0], [-r * .2, -r * .2]]);
+    ctx.fillStyle = '#fffdf5'; ctx.fill();
+    ctx.strokeStyle = 'rgba(18,12,28,.9)'; ctx.lineWidth = Math.max(1, size * .022); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Hard junk: the same rock, tinted cold and bound with two iron bands.
+function boundRock(ctx: CanvasRenderingContext2D, size: number) {
+  rock(ctx, size);
+  const r = size * .32;
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = 'rgba(70,105,160,.32)';
+  ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
+  ctx.globalCompositeOperation = 'source-over';
+  for (const y of [-r * .7, r * .66]) {
+    ctx.beginPath(); ctx.moveTo(-r * .98, y); ctx.lineTo(r * .98, y);
+    ctx.strokeStyle = '#15171f'; ctx.lineWidth = Math.max(2, size * .075); ctx.stroke();
+    ctx.strokeStyle = '#9aa6bd'; ctx.lineWidth = Math.max(.8, size * .022); ctx.stroke();
+    for (const x of [-r * .7, r * .7]) {
+      ctx.beginPath(); ctx.arc(x, y, Math.max(1, size * .03), 0, Math.PI * 2);
+      ctx.fillStyle = '#d7deea'; ctx.fill();
+    }
+  }
+}
+
+export function spriteKind(cell: Cell): string {
+  if (cell.kind === 'junk') return cell.hard ? 'junk:hard' : 'junk';
+  return cell.special ? `${cell.color}:${cell.special}` : cell.color;
+}
+
 export function drawSprite(ctx: CanvasRenderingContext2D, cell: Cell, x: number, y: number, size: number) {
-  const kind = cell.kind === 'junk' ? 'junk' : cell.color;
   const dpr = scale(ctx);
-  const sprite = cachedSprite(kind, size, size, dpr, surface => {
-    if (cell.kind === 'junk') rock(surface, size);
-    else jewel(surface, cell.color, size);
+  const sprite = cachedSprite(spriteKind(cell), size, size, dpr, surface => {
+    if (cell.kind === 'junk') {
+      if (cell.hard) boundRock(surface, size); else rock(surface, size);
+    } else {
+      jewel(surface, cell.color, size);
+      if (cell.special) specialMark(surface, cell.special, size);
+    }
   });
   ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
 }

@@ -1,5 +1,5 @@
 import { BOARD_SIZE, MIN_COLORS, MIN_MATCH } from '../types';
-import type { Board, Cell, GemColor, MatchGroup, Move, MoveResult, Pos, Rng } from '../types';
+import type { Blast, Board, CascadeStep, Cell, GemColor, MatchGroup, Move, MoveResult, Pos, Rng, SpecialKind } from '../types';
 
 const copy = (board: Board): Board => board.map(row => row.map(cell => cell ? { ...cell } : null));
 const gem = (color: GemColor): Cell => ({ kind: 'gem', color });
@@ -138,6 +138,115 @@ export function createBoard(rng: Rng, colors: readonly GemColor[]): Board {
   return playable(board) ? board : reshuffle(board, rng, colors);
 }
 
+// Longest straight horizontal and vertical runs inside one group.
+function runLengths(cells: Pos[]): { h: number; v: number } {
+  const set = new Set(cells.map(key));
+  let h = 0, v = 0;
+  for (const p of cells) {
+    if (!set.has(key({ row: p.row, col: p.col - 1 }))) {
+      let n = 0; while (set.has(key({ row: p.row, col: p.col + n }))) n++;
+      h = Math.max(h, n);
+    }
+    if (!set.has(key({ row: p.row - 1, col: p.col }))) {
+      let n = 0; while (set.has(key({ row: p.row + n, col: p.col }))) n++;
+      v = Math.max(v, n);
+    }
+  }
+  return { h, v };
+}
+
+export function specialFor(group: MatchGroup): SpecialKind | null {
+  const { h, v } = runLengths(group.cells);
+  if (h >= 5 || v >= 5) return 'prism';
+  if (h >= MIN_MATCH && v >= MIN_MATCH) return 'bomb';
+  if (h >= 4) return 'row';
+  if (v >= 4) return 'col';
+  return null;
+}
+
+export function blastArea(kind: SpecialKind, origin: Pos, color: GemColor, board: Board): Pos[] {
+  const cells: Pos[] = [];
+  for (let row = 0; row < BOARD_SIZE; row++) for (let col = 0; col < BOARD_SIZE; col++) {
+    const hit = kind === 'row' ? row === origin.row
+      : kind === 'col' ? col === origin.col
+      : kind === 'bomb' ? Math.abs(row - origin.row) <= 1 && Math.abs(col - origin.col) <= 1
+      : (row === origin.row && col === origin.col) || colorAt(board, row, col) === color;
+    if (hit) cells.push({ row, col });
+  }
+  return cells;
+}
+
+const NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]] as const;
+
+// Clears one step's matches on working, in place, and returns everything but the refill.
+function clearStep(working: Board, groups: MatchGroup[], swapped: Pos[]): Omit<CascadeStep, 'chain' | 'boardAfter'> {
+  const before = copy(working);
+  const matched = new Map<string, Pos>();
+  for (const group of groups) for (const p of group.cells) matched.set(key(p), p);
+
+  // Fire every special among the matched gems, and any special their blasts reach.
+  const cleared = new Map(matched);
+  const blastedJunk = new Map<string, Pos>();
+  const fired = new Set<string>();
+  const queue = [...matched.values()].filter(p => {
+    const cell = before[p.row]![p.col];
+    return cell?.kind === 'gem' && cell.special;
+  });
+  const blasts: Blast[] = [];
+  while (queue.length) {
+    const origin = queue.shift()!;
+    if (fired.has(key(origin))) continue;
+    fired.add(key(origin));
+    const source = before[origin.row]![origin.col];
+    if (source?.kind !== 'gem' || !source.special) continue;
+    const cells = blastArea(source.special, origin, source.color, before);
+    blasts.push({ kind: source.special, color: source.color, origin, cells });
+    for (const q of cells) {
+      const cell = before[q.row]![q.col];
+      if (cell?.kind === 'junk') blastedJunk.set(key(q), q);
+      else if (cell?.kind === 'gem') {
+        cleared.set(key(q), q);
+        if (cell.special && !fired.has(key(q))) queue.push(q);
+      }
+    }
+  }
+
+  // Junk next to matched gems: plain junk clears, hard junk cracks.
+  const clearedJunk = new Map(blastedJunk);
+  const crackedJunk = new Map<string, Pos>();
+  for (const p of matched.values()) for (const [dr, dc] of NEIGHBORS) {
+    const q = { row: p.row + dr, col: p.col + dc };
+    const cell = inside(q) ? before[q.row]![q.col] : null;
+    if (cell?.kind !== 'junk' || blastedJunk.has(key(q))) continue;
+    if (cell.hard) crackedJunk.set(key(q), q); else clearedJunk.set(key(q), q);
+  }
+
+  const blasted: MatchGroup[] = [];
+  for (let row = 0; row < BOARD_SIZE; row++) for (let col = 0; col < BOARD_SIZE; col++) {
+    const p = { row, col };
+    if (!cleared.has(key(p)) || matched.has(key(p))) continue;
+    const color = colorAt(before, row, col)!;
+    const group = blasted.find(item => item.color === color);
+    if (group) group.cells.push(p); else blasted.push({ color, cells: [p] });
+  }
+
+  const created: CascadeStep['created'] = [];
+  for (const group of groups) {
+    const special = specialFor(group);
+    if (!special) continue;
+    const pos = group.cells.find(p => swapped.some(s => s.row === p.row && s.col === p.col))
+      ?? [...group.cells].sort((x, y) => y.row - x.row || x.col - y.col)[0]!;
+    created.push({ pos, color: group.color, special });
+  }
+
+  for (const p of cleared.values()) working[p.row]![p.col] = null;
+  for (const p of clearedJunk.values()) working[p.row]![p.col] = null;
+  for (const p of crackedJunk.values()) working[p.row]![p.col] = { kind: 'junk' };
+  for (const item of created) working[item.pos.row]![item.pos.col] = { kind: 'gem', color: item.color, special: item.special };
+  return { groups, blasts, blasted, created, clearedJunk: [...clearedJunk.values()],
+    crackedJunk: [...crackedJunk.values()], boardAfterClear: copy(working) };
+}
+
 export function applyMove(board: Board, move: Move, rng: Rng, colors: readonly GemColor[]): MoveResult {
   const invalid = (): MoveResult => ({ valid: false, steps: [], board, reshuffled: false });
   const { a, b } = move;
@@ -150,16 +259,7 @@ export function applyMove(board: Board, move: Move, rng: Rng, colors: readonly G
   const steps: MoveResult['steps'] = [];
   let groups = findMatches(working);
   while (groups.length > 0) {
-    const junk = new Map<string, Pos>();
-    for (const group of groups) for (const p of group.cells) {
-      for (const q of [{ row: p.row - 1, col: p.col }, { row: p.row + 1, col: p.col },
-        { row: p.row, col: p.col - 1 }, { row: p.row, col: p.col + 1 }]) {
-        if (inside(q) && working[q.row]?.[q.col]?.kind === 'junk') junk.set(key(q), q);
-      }
-    }
-    for (const group of groups) for (const p of group.cells) working[p.row]![p.col] = null;
-    for (const p of junk.values()) working[p.row]![p.col] = null;
-    const boardAfterClear = copy(working);
+    const cleared = clearStep(working, groups, steps.length === 0 ? [a, b] : []);
     for (let col = 0; col < BOARD_SIZE; col++) {
       let dest = BOARD_SIZE - 1;
       for (let row = BOARD_SIZE - 1; row >= 0; row--) {
@@ -168,23 +268,28 @@ export function applyMove(board: Board, move: Move, rng: Rng, colors: readonly G
       }
       while (dest >= 0) working[dest--]![col] = gem(colors[rng.int(colors.length)]!);
     }
-    steps.push({ chain: steps.length + 1, groups, clearedJunk: [...junk.values()], boardAfterClear, boardAfter: copy(working) });
+    steps.push({ chain: steps.length + 1, ...cleared, boardAfter: copy(working) });
     groups = findMatches(working);
   }
   const reshuffled = findValidMoves(working).length === 0;
   return { valid: true, steps, board: reshuffled ? reshuffle(working, rng, colors) : working, reshuffled };
 }
 
-export function addJunk(board: Board, count: number, rng: Rng, colors: readonly GemColor[]): { board: Board; reshuffled: boolean } {
+export function addJunk(board: Board, count: number, rng: Rng, colors: readonly GemColor[],
+  hard = false): { board: Board; reshuffled: boolean } {
   const working = copy(board);
-  const gems: Pos[] = [];
+  const plain: Pos[] = [];
+  const specials: Pos[] = [];
   for (let row = 0; row < BOARD_SIZE; row++) for (let col = 0; col < BOARD_SIZE; col++) {
-    if (working[row]?.[col]?.kind === 'gem') gems.push({ row, col });
+    const cell = working[row]?.[col];
+    if (cell?.kind === 'gem') (cell.special ? specials : plain).push({ row, col });
   }
-  const conversions = Math.min(Math.max(0, Math.floor(count)), Math.max(0, gems.length - Math.ceil(BOARD_SIZE * BOARD_SIZE / 2)));
+  const gemCount = plain.length + specials.length;
+  const conversions = Math.min(Math.max(0, Math.floor(count)), Math.max(0, gemCount - Math.ceil(BOARD_SIZE * BOARD_SIZE / 2)));
   for (let i = 0; i < conversions; i++) {
-    const p = gems.splice(rng.int(gems.length), 1)[0]!;
-    working[p.row]![p.col] = { kind: 'junk' };
+    const pool = plain.length ? plain : specials;
+    const p = pool.splice(rng.int(pool.length), 1)[0]!;
+    working[p.row]![p.col] = hard ? { kind: 'junk', hard: true } : { kind: 'junk' };
   }
   const reshuffled = !playable(working);
   return { board: reshuffled ? reshuffle(working, rng, colors) : working, reshuffled };

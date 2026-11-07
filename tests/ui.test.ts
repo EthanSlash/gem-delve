@@ -140,12 +140,12 @@ describe('turn timeline', () => {
     const cleared: Board = [[null]];
     const refill: Board = [[{ kind: 'gem', color: 'green' }]];
     const final: Board = [[{ kind: 'junk' }]];
-    const result: TurnResult = { valid: true, steps: [{ chain: 2, groups: [], clearedJunk: [], boardAfterClear: cleared, boardAfter: refill }],
-      effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: false,
-      enemyAction: { attack: 3, shieldAbsorbed: 0, hpLost: 3, junkAdded: 1, reshuffled: true },
+    const result: TurnResult = { valid: true, steps: [{ chain: 2, groups: [], blasts: [], blasted: [], created: [], clearedJunk: [], crackedJunk: [], boardAfterClear: cleared, boardAfter: refill }],
+      effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, enemyEvents: { armorBlocked: 0, regenerated: 0, enraged: false }, reshuffled: false,
+      enemyAction: { attack: 3, shieldAbsorbed: 0, hpLost: 3, goldStolen: 0, junkAdded: 1, reshuffled: true },
       state: { board: final, player: { hp: 7, maxHp: 10, gold: 0, colors: ['red', 'purple', 'green'],
         colorLevels: { red: 0, purple: 0, green: 0, yellow: 0 }, relics: [] }, shield: 0,
-        enemy: { id: 'test', hp: 10, countdown: 2 }, turn: 1, status: 'ongoing', rngState: 1 } };
+        enemy: { id: 'test', hp: 10, countdown: 2, regenerated: false, enraged: false }, turn: 1, status: 'ongoing', rngState: 1 } };
     const phases = buildTimeline(board, result);
     expect(phases.map(p => p.kind)).toEqual(['swap', 'clear', 'fall', 'enemy', 'finish']);
     expect(phases.map(p => p.board)).toEqual([board, cleared, refill, refill, final]);
@@ -159,7 +159,7 @@ describe('turn timeline', () => {
     expect(sameBoard(board, [[{ kind: 'gem', color: 'red' }]])).toBe(true);
     expect(sameBoard(board, final)).toBe(false);
     const long = buildTimeline(board, { ...result, steps: Array.from({ length: 12 }, (_, i) => ({
-      chain: i + 1, groups: [], clearedJunk: [], boardAfterClear: cleared, boardAfter: refill,
+      chain: i + 1, groups: [], blasts: [], blasted: [], created: [], clearedJunk: [], crackedJunk: [], boardAfterClear: cleared, boardAfter: refill,
     })) });
     expect(long.filter(p => p.kind === 'clear').map(p => p.chain)).toEqual(
       Array.from({ length: 12 }, (_, i) => i + 1));
@@ -173,11 +173,11 @@ describe('turn timeline', () => {
     const board: Board = [[{ kind: 'gem', color: 'red' }]];
     const final: Board = [[{ kind: 'gem', color: 'green' }]];
     const result: TurnResult = {
-      valid: true, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: true,
-      enemyAction: { attack: 1, shieldAbsorbed: 0, hpLost: 1, junkAdded: 0, reshuffled: false },
+      valid: true, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, enemyEvents: { armorBlocked: 0, regenerated: 0, enraged: false }, reshuffled: true,
+      enemyAction: { attack: 1, shieldAbsorbed: 0, hpLost: 1, goldStolen: 0, junkAdded: 0, reshuffled: false },
       state: { board: final, player: { hp: 9, maxHp: 10, gold: 0, colors: ['red', 'purple', 'green'],
         colorLevels: { red: 0, purple: 0, green: 0, yellow: 0 }, relics: [] }, shield: 0,
-        enemy: { id: 'test', hp: 10, countdown: 2 }, turn: 1, status: 'ongoing', rngState: 1 },
+        enemy: { id: 'test', hp: 10, countdown: 2, regenerated: false, enraged: false }, turn: 1, status: 'ongoing', rngState: 1 },
     };
     expect(buildTimeline(board, result).find(p => p.kind === 'enemy')?.board).toBe(final);
     expect(buildTimeline(board, { ...result, reshuffled: false }).find(p => p.kind === 'enemy')?.board).toBe(board);

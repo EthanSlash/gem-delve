@@ -185,3 +185,91 @@ describe('core', () => {
     expect(b).toEqual(before);
   });
 });
+
+describe('special gems', () => {
+  const empty = (): Board => Array.from({ length: 6 }, () => Array.from({ length: 6 }, junk));
+  const place = (b: Board, cells: [number, number, GemColor][]) => { for (const [r, c, color] of cells) b[r]![c] = gem(color); };
+  const firstStep = (b: Board, m: Move) => {
+    const result = api.applyMove(b, m, api.createRng(3), colors);
+    expect(result.valid).toBe(true);
+    return result.steps[0]!;
+  };
+
+  it('makes a row special from a horizontal four and a column special from a vertical four, on the swapped cell', () => {
+    const h = empty();
+    place(h, [[2, 0, 'red'], [2, 1, 'red'], [2, 2, 'purple'], [2, 3, 'red'], [3, 2, 'red']]);
+    const hs = firstStep(h, { a: { row: 2, col: 2 }, b: { row: 3, col: 2 } });
+    expect(hs.created).toEqual([{ pos: { row: 2, col: 2 }, color: 'red', special: 'row' }]);
+    expect(hs.boardAfterClear[2]![2]).toEqual({ kind: 'gem', color: 'red', special: 'row' });
+
+    const v = empty();
+    place(v, [[0, 2, 'green'], [1, 2, 'green'], [2, 2, 'purple'], [3, 2, 'green'], [2, 3, 'green']]);
+    const vs = firstStep(v, { a: { row: 2, col: 3 }, b: { row: 2, col: 2 } });
+    expect(vs.created).toEqual([{ pos: { row: 2, col: 2 }, color: 'green', special: 'col' }]);
+  });
+
+  it('makes a bomb from an L shape and a prism from a run of five', () => {
+    const l = empty();
+    place(l, [[0, 0, 'red'], [0, 1, 'red'], [0, 2, 'purple'], [1, 2, 'red'], [1, 0, 'red'], [2, 0, 'red']]);
+    expect(firstStep(l, { a: { row: 0, col: 2 }, b: { row: 1, col: 2 } }).created)
+      .toEqual([{ pos: { row: 0, col: 2 }, color: 'red', special: 'bomb' }]);
+
+    const five = empty();
+    place(five, [[0, 0, 'red'], [0, 1, 'red'], [0, 2, 'purple'], [0, 3, 'red'], [0, 4, 'red'], [1, 2, 'red']]);
+    expect(firstStep(five, { a: { row: 0, col: 2 }, b: { row: 1, col: 2 } }).created)
+      .toEqual([{ pos: { row: 0, col: 2 }, color: 'red', special: 'prism' }]);
+  });
+
+  it('makes nothing from a plain three and classifies groups by their straight runs', () => {
+    expect(core.specialFor({ color: 'red', cells: [0, 1, 2].map(col => ({ row: 0, col })) })).toBeNull();
+    expect(core.specialFor({ color: 'red', cells: [0, 1, 2, 3].map(row => ({ row, col: 4 })) })).toBe('col');
+  });
+
+  it('fires matched specials, chains into specials they reach, and clears hard junk in the blast', () => {
+    const b = empty();
+    b[3] = [{ kind: 'gem', color: 'red', special: 'row' }, gem('red'), gem('purple'), gem('green'),
+      { kind: 'gem', color: 'yellow', special: 'col' }, { kind: 'junk', hard: true }];
+    b[4]![2] = gem('red');
+    place(b, [[0, 4, 'green'], [1, 4, 'purple'], [2, 4, 'green'], [4, 4, 'purple'], [5, 4, 'green']]);
+    const before = structuredClone(b);
+    const step = firstStep(b, { a: { row: 3, col: 2 }, b: { row: 4, col: 2 } });
+    expect(step.blasts.map(blast => [blast.kind, blast.origin])).toEqual([
+      ['row', { row: 3, col: 0 }], ['col', { row: 3, col: 4 }],
+    ]);
+    expect(step.blasted.map(group => [group.color, positions(group.cells)])).toEqual([
+      ['green', ['0,4', '2,4', '3,3', '5,4']], ['purple', ['1,4', '4,4']], ['yellow', ['3,4']],
+    ]);
+    expect(positions(step.clearedJunk)).toContain('3,5');
+    expect(step.boardAfterClear[3]!.every(cell => cell === null)).toBe(true);
+    expect(step.boardAfterClear.every(row => row[4] === null)).toBe(true);
+    expect(b).toEqual(before);
+  });
+
+  it('prism clears every gem of its color', () => {
+    const b = empty();
+    b[0]![0] = { kind: 'gem', color: 'green', special: 'prism' };
+    place(b, [[0, 1, 'green'], [0, 2, 'purple'], [1, 2, 'green'], [5, 5, 'green'], [4, 0, 'green'], [5, 0, 'red']]);
+    const step = firstStep(b, { a: { row: 0, col: 2 }, b: { row: 1, col: 2 } });
+    expect(step.blasts).toHaveLength(1);
+    expect(step.blasted).toEqual([{ color: 'green', cells: [{ row: 4, col: 0 }, { row: 5, col: 5 }] }]);
+  });
+
+  it('cracks hard junk next to a match instead of clearing it', () => {
+    const b = forcedBoard();
+    b[1]![0] = { kind: 'junk', hard: true };
+    const step = firstStep(b, move);
+    expect(positions(step.crackedJunk)).toEqual(['1,0']);
+    expect(step.clearedJunk).toEqual([]);
+    expect(step.boardAfterClear[1]![0]).toEqual(junk());
+  });
+
+  it('adds hard junk on request and converts plain gems before specials', () => {
+    const b = forcedBoard();
+    for (let col = 0; col < 6; col++) b[5]![col] = { kind: 'gem', color: colors[(10 + col) % 3]!, special: 'bomb' };
+    const result = api.addJunk(b, 8, api.createRng(2), colors, true);
+    const added = result.board.flat().filter(cell => cell?.kind === 'junk');
+    expect(added.length).toBeGreaterThan(0);
+    expect(added.every(cell => cell?.kind === 'junk' && cell.hard)).toBe(true);
+    if (!result.reshuffled) expect(result.board[5]!.every(cell => cell?.kind === 'gem' && cell.special === 'bomb')).toBe(true);
+  });
+});

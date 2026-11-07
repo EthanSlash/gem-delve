@@ -14,9 +14,21 @@ export const MIN_COLORS = 3;
 export type GemColor = 'red' | 'purple' | 'green' | 'yellow';
 export const ALL_COLORS: readonly GemColor[] = ['red', 'purple', 'green', 'yellow'];
 
+// Special gems keep their color and match like plain gems. When one is cleared, by a match or
+// by another special's blast, it fires:
+//   row:   clears its whole row          (made by a straight horizontal run of 4)
+//   col:   clears its whole column       (made by a straight vertical run of 4)
+//   bomb:  clears the 3x3 square around it (made by an L or T shaped group)
+//   prism: clears every gem of its color   (made by a straight run of 5 or more)
+// A group that qualifies for several kinds makes the first one in the order prism, bomb, row/col.
+// Blasts clear junk in their area outright, including hard junk, and set off other specials.
+export type SpecialKind = 'row' | 'col' | 'bomb' | 'prism';
+
 // A junk cell cannot be swapped and never matches. It falls with gravity, and it is cleared
-// when a matched gem is orthogonally adjacent to it.
-export type Cell = { kind: 'gem'; color: GemColor } | { kind: 'junk' };
+// when a matched gem is orthogonally adjacent to it. Hard junk cracks into plain junk instead.
+export type Cell =
+  | { kind: 'gem'; color: GemColor; special?: SpecialKind }
+  | { kind: 'junk'; hard?: boolean };
 
 // A settled board has no null cells. Null appears only inside CascadeStep.boardAfterClear.
 export type Board = (Cell | null)[][];
@@ -47,12 +59,30 @@ export interface MatchGroup {
   cells: Pos[];
 }
 
+export interface Blast {
+  kind: SpecialKind;
+  color: GemColor;
+  origin: Pos;
+  // Every cell in the blast area, whether or not it held anything.
+  cells: Pos[];
+}
+
 export interface CascadeStep {
   // 1 for the player's own swap, 2 for the first cascade, and so on.
   chain: number;
   groups: MatchGroup[];
+  // Specials that fired this step, in the order they went off.
+  blasts: Blast[];
+  // Gems cleared by blasts that were not part of a match, grouped by color. A color appears once.
+  blasted: MatchGroup[];
+  // Specials made by this step's groups. Each sits in boardAfterClear at its position.
+  created: { pos: Pos; color: GemColor; special: SpecialKind }[];
   clearedJunk: Pos[];
-  // Matched gems and adjacent junk removed, before anything falls.
+  // Hard junk next to a match that turned into plain junk.
+  crackedJunk: Pos[];
+  // Matched gems, blasted cells and adjacent junk removed, new specials placed, before anything
+  // falls. A new special goes on the swapped cell when the group contains it, otherwise on the
+  // group's lowest cell, leftmost on ties.
   boardAfterClear: Board;
   // Settled after gravity and refill. Each column refills from the top.
   boardAfter: Board;
@@ -91,12 +121,14 @@ export interface CoreApi {
   reshuffle(board: Board, rng: Rng, colors: readonly GemColor[]): Board;
   // Turns up to count random gems into junk, then reshuffles if needed so the board stays
   // playable. Never creates a match. Conversion stops once fewer than half the cells would
-  // remain gems. The final junk count can be lower than requested if reshuffle removes junk.
+  // remain gems. Plain gems are converted before special gems. The final junk count can be
+  // lower than requested if reshuffle removes junk.
   addJunk(
     board: Board,
     count: number,
     rng: Rng,
     colors: readonly GemColor[],
+    hard?: boolean,
   ): { board: Board; reshuffled: boolean };
 }
 
@@ -132,6 +164,21 @@ export interface RelicDef {
   effects: RelicEffect[];
 }
 
+// Enemy abilities are plain data, like relics. Thresholds are fractions of maxHp.
+export type EnemyAbility =
+  // Once per combat, when damage leaves hp at or below threshold (and above 0), heals
+  // floor(healRatio * maxHp).
+  | { type: 'regenerate'; threshold: number; healRatio: number }
+  // Each attack also takes up to this much gold.
+  | { type: 'stealGold'; amount: number }
+  // Each turn's total damage is reduced by this amount, never below 0.
+  | { type: 'armor'; amount: number }
+  // Junk added by this enemy is hard junk.
+  | { type: 'hardJunk' }
+  // Once hp is at or below threshold: countdown length changes by countdownDelta (never below 1)
+  // and each action adds junkBonus more junk. The current countdown is also shortened then.
+  | { type: 'enrage'; threshold: number; countdownDelta: number; junkBonus: number };
+
 export interface EnemyDef {
   id: EnemyId;
   name: string;
@@ -142,6 +189,9 @@ export interface EnemyDef {
   // Junk cells added on each enemy action.
   junkPerAction: number;
   isBoss: boolean;
+  abilities: EnemyAbility[];
+  // Player-facing Traditional Chinese summary of the abilities, short enough for one line.
+  trait: string;
 }
 
 export interface BalanceConfig {
@@ -186,6 +236,8 @@ export interface CombatState {
     hp: number;
     // Moves left until the enemy acts.
     countdown: number;
+    regenerated: boolean;
+    enraged: boolean;
   };
   turn: number;
   status: CombatStatus;
@@ -203,14 +255,24 @@ export interface EnemyAction {
   attack: number;
   shieldAbsorbed: number;
   hpLost: number;
+  goldStolen: number;
   junkAdded: number;
   reshuffled: boolean;
+}
+
+// Things the enemy's abilities did this turn, for presentation.
+export interface EnemyEvents {
+  armorBlocked: number;
+  regenerated: number;
+  enraged: boolean;
 }
 
 export interface TurnResult {
   valid: boolean;
   steps: CascadeStep[];
+  // damage is what actually reached the enemy, after armor.
   effects: EffectTotals;
+  enemyEvents: EnemyEvents;
   // True if the board was reshuffled after the player's cascades, before any enemy action.
   reshuffled: boolean;
   // Null if the enemy did not act this turn.
@@ -225,15 +287,17 @@ export interface TurnResult {
 //   levelMult = 1 + levelBonus * colorLevels[color]
 //   sizeMult  = product of multiplier for every bigMatch relic with cells >= minSize
 //   value = floor(cells * perGem[color] * chainMult * levelMult * sizeMult) + colorFlat total
+// Each blasted group is valued the same way with sizeMult 1 and no colorFlat.
 //
 // Turn order:
 //   1. Invalid move: nothing changes, turn does not advance.
-//   2. Apply cascades, add gold, add shield, heal (never above maxHp), deal damage.
+//   2. Apply cascades, add gold, add shield, heal (never above maxHp), deal damage minus armor.
 //   3. If enemy hp <= 0: status 'won', the enemy does not act.
-//   4. Countdown decreases by 1. At 0 the enemy acts: shield absorbs the attack first,
+//   4. Regenerate, then enrage, if their thresholds are reached.
+//   5. Countdown decreases by 1. At 0 the enemy acts: shield absorbs the attack first,
 //      the rest hits hp, shield is then multiplied by the shieldRetain total and floored,
-//      junk is added, and countdown resets.
-//   5. If player hp <= 0: status 'lost'.
+//      gold is stolen, junk is added, and countdown resets.
+//   6. If player hp <= 0: status 'lost'.
 export interface CombatApi {
   createCombat(player: PlayerState, enemy: EnemyDef, content: GameContent, seed: number): CombatState;
   applyTurn(state: CombatState, move: Move, content: GameContent): TurnResult;

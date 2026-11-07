@@ -2,11 +2,21 @@ import type { GameContent } from '../types';
 
 export const GAME_CONTENT: GameContent = {
   enemies: [
-    { id: 'slime', name: '史萊姆', maxHp: 110, attack: 17, countdown: 2, junkPerAction: 1, isBoss: false },
-    { id: 'caveBat', name: '洞穴蝙蝠', maxHp: 190, attack: 25, countdown: 2, junkPerAction: 1, isBoss: false },
-    { id: 'skeleton', name: '骷髏戰士', maxHp: 270, attack: 30, countdown: 2, junkPerAction: 2, isBoss: false },
-    { id: 'gargoyle', name: '石像鬼', maxHp: 350, attack: 36, countdown: 2, junkPerAction: 2, isBoss: false },
-    { id: 'slimeKing', name: '史萊姆王', maxHp: 430, attack: 44, countdown: 2, junkPerAction: 3, isBoss: true },
+    { id: 'slime', name: '史萊姆', maxHp: 110, attack: 17, countdown: 2, junkPerAction: 1, isBoss: false,
+      abilities: [{ type: 'regenerate', threshold: 0.5, healRatio: 0.25 }],
+      trait: '分裂：半血時回復 25% 生命' },
+    { id: 'caveBat', name: '洞穴蝙蝠', maxHp: 190, attack: 18, countdown: 1, junkPerAction: 1, isBoss: false,
+      abilities: [{ type: 'stealGold', amount: 5 }],
+      trait: '偷竊：攻擊頻繁並偷 5 金幣' },
+    { id: 'skeleton', name: '骷髏戰士', maxHp: 270, attack: 30, countdown: 2, junkPerAction: 2, isBoss: false,
+      abilities: [{ type: 'armor', amount: 8 }],
+      trait: '護甲：每回合傷害減少 8' },
+    { id: 'gargoyle', name: '石像鬼', maxHp: 350, attack: 32, countdown: 2, junkPerAction: 2, isBoss: false,
+      abilities: [{ type: 'hardJunk' }],
+      trait: '石化：放出的石塊要清兩次' },
+    { id: 'slimeKing', name: '史萊姆王', maxHp: 430, attack: 34, countdown: 2, junkPerAction: 3, isBoss: true,
+      abilities: [{ type: 'enrage', threshold: 0.35, countdownDelta: -1, junkBonus: 1 }],
+      trait: '狂暴：生命低於 35% 後攻擊加快' },
   ],
   relics: [
     {

@@ -9,7 +9,7 @@ const api: RunApi = runApi;
 const content = (): GameContent => ({
   enemies: [1, 2, 3].map(n => ({
     id: `enemy-${n}`, name: `Enemy ${n}`, maxHp: 1, attack: 0, countdown: 2,
-    junkPerAction: 0, isBoss: n === 3,
+    junkPerAction: 0, isBoss: n === 3, abilities: [], trait: '',
   })),
   relics: [
     { id: 'heart', name: 'Heart', description: '', effects: [{ type: 'maxHp', amount: 4 }, { type: 'maxHp', amount: 2 }] },
@@ -82,7 +82,7 @@ describe('run', () => {
     game.enemies[0]!.countdown = 1;
     game.balance.perGem = { red: 0, purple: 0, green: 0, yellow: 0 };
     const start = api.createRun(5, game), before = structuredClone(start);
-    const empty = { valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: false, enemyAction: null, state: start.combat };
+    const empty = { valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, enemyEvents: { armorBlocked: 0, regenerated: 0, enraged: false }, reshuffled: false, enemyAction: null, state: start.combat };
     expect(api.playMove(start, invalid, game)).toEqual({ turn: empty, run: start });
     const { run: lost, turn } = api.playMove(start, firstMove(start), game);
     expect(turn.valid).toBe(true);

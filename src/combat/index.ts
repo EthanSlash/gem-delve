@@ -1,6 +1,7 @@
 import { addJunk, applyMove, createBoard, createRng } from '../core/index';
 import type {
-  Board, CombatState, EffectTotals, EnemyDef, GameContent, Move, PlayerState, RelicEffect, TurnResult,
+  Board, CombatState, EffectTotals, EnemyAbility, EnemyDef, EnemyEvents, GameContent, MatchGroup, Move,
+  PlayerState, RelicEffect, TurnResult,
 } from '../types';
 
 function relicEffects(player: PlayerState, content: GameContent): RelicEffect[] {
@@ -11,8 +12,13 @@ function relicEffects(player: PlayerState, content: GameContent): RelicEffect[] 
   });
 }
 
-function countdown(enemy: EnemyDef, effects: RelicEffect[]): number {
-  return Math.max(1, enemy.countdown + effects.reduce(
+function ability<T extends EnemyAbility['type']>(enemy: EnemyDef, type: T): Extract<EnemyAbility, { type: T }> | undefined {
+  return enemy.abilities.find((item): item is Extract<EnemyAbility, { type: T }> => item.type === type);
+}
+
+function countdown(enemy: EnemyDef, effects: RelicEffect[], enraged = false): number {
+  const rage = enraged ? ability(enemy, 'enrage')?.countdownDelta ?? 0 : 0;
+  return Math.max(1, enemy.countdown + rage + effects.reduce(
     (sum, effect) => sum + (effect.type === 'enemyCountdown' ? effect.delta : 0), 0,
   ));
 }
@@ -30,7 +36,7 @@ export function createCombat(player: PlayerState, enemy: EnemyDef, content: Game
     board,
     player: { ...player, colors: [...player.colors], colorLevels: { ...player.colorLevels }, relics: [...player.relics] },
     shield: effects.reduce((sum, effect) => sum + (effect.type === 'startShield' ? effect.amount : 0), 0),
-    enemy: { id: enemy.id, hp: enemy.maxHp, countdown: countdown(enemy, effects) },
+    enemy: { id: enemy.id, hp: enemy.maxHp, countdown: countdown(enemy, effects), regenerated: false, enraged: false },
     turn: 0,
     status: 'ongoing',
     rngState: rng.state(),
@@ -39,7 +45,8 @@ export function createCombat(player: PlayerState, enemy: EnemyDef, content: Game
 
 export function applyTurn(state: CombatState, move: Move, content: GameContent): TurnResult {
   const empty = (): TurnResult => ({
-    valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 }, reshuffled: false, enemyAction: null, state,
+    valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 },
+    enemyEvents: { armorBlocked: 0, regenerated: 0, enraged: false }, reshuffled: false, enemyAction: null, state,
   });
   if (state.status !== 'ongoing') return empty();
   const rng = createRng(state.rngState);
@@ -52,26 +59,32 @@ export function applyTurn(state: CombatState, move: Move, content: GameContent):
   const chainBonus = relics.reduce((sum, effect) => sum + (effect.type === 'chainBonus' ? effect.bonus : 0), content.balance.chainBonus);
   const junkHeal = relics.reduce((sum, effect) => sum + (effect.type === 'junkHeal' ? effect.amount : 0), 0);
   const totals: EffectTotals = { damage: 0, shield: 0, heal: 0, gold: 0 };
+  const add = (group: MatchGroup, chain: number, blasted: boolean) => {
+    let multiplier = 1;
+    let flat = 0;
+    if (!blasted) for (const effect of relics) {
+      if (effect.type === 'bigMatch' && group.cells.length >= effect.minSize) multiplier *= effect.multiplier;
+      if (effect.type === 'colorFlat' && effect.color === group.color) flat += effect.flat;
+    }
+    const value = Math.floor(group.cells.length * content.balance.perGem[group.color]
+      * (1 + chainBonus * (chain - 1))
+      * (1 + content.balance.levelBonus * state.player.colorLevels[group.color]) * multiplier) + flat;
+    switch (group.color) {
+      case 'red': totals.damage += value; break;
+      case 'purple': totals.shield += value; break;
+      case 'green': totals.heal += value; break;
+      case 'yellow': totals.gold += value; break;
+    }
+  };
   for (const step of result.steps) {
     totals.heal += junkHeal * step.clearedJunk.length;
-    for (const group of step.groups) {
-      let multiplier = 1;
-      let flat = 0;
-      for (const effect of relics) {
-        if (effect.type === 'bigMatch' && group.cells.length >= effect.minSize) multiplier *= effect.multiplier;
-        if (effect.type === 'colorFlat' && effect.color === group.color) flat += effect.flat;
-      }
-      const value = Math.floor(group.cells.length * content.balance.perGem[group.color]
-        * (1 + chainBonus * (step.chain - 1))
-        * (1 + content.balance.levelBonus * state.player.colorLevels[group.color]) * multiplier) + flat;
-      switch (group.color) {
-        case 'red': totals.damage += value; break;
-        case 'purple': totals.shield += value; break;
-        case 'green': totals.heal += value; break;
-        case 'yellow': totals.gold += value; break;
-      }
-    }
+    for (const group of step.groups) add(group, step.chain, false);
+    for (const group of step.blasted) add(group, step.chain, true);
   }
+  const events: EnemyEvents = { armorBlocked: 0, regenerated: 0, enraged: false };
+  const armor = ability(enemyDef, 'armor')?.amount ?? 0;
+  events.armorBlocked = Math.min(totals.damage, armor);
+  totals.damage -= events.armorBlocked;
 
   const next: CombatState = {
     ...state,
@@ -86,6 +99,19 @@ export function applyTurn(state: CombatState, move: Move, content: GameContent):
   if (next.enemy.hp <= 0) {
     next.status = 'won';
   } else {
+    const regenerate = ability(enemyDef, 'regenerate');
+    if (regenerate && !next.enemy.regenerated && next.enemy.hp <= regenerate.threshold * enemyDef.maxHp) {
+      const healed = Math.min(enemyDef.maxHp - next.enemy.hp, Math.floor(regenerate.healRatio * enemyDef.maxHp));
+      next.enemy.hp += healed;
+      next.enemy.regenerated = true;
+      events.regenerated = healed;
+    }
+    const enrage = ability(enemyDef, 'enrage');
+    if (enrage && !next.enemy.enraged && next.enemy.hp <= enrage.threshold * enemyDef.maxHp) {
+      next.enemy.enraged = true;
+      events.enraged = true;
+      next.enemy.countdown = Math.max(1, next.enemy.countdown + Math.min(0, enrage.countdownDelta));
+    }
     next.enemy.countdown--;
     if (next.enemy.countdown <= 0) {
       const attack = Math.floor(enemyDef.attack * relics.reduce(
@@ -96,14 +122,18 @@ export function applyTurn(state: CombatState, move: Move, content: GameContent):
       next.player.hp -= hpLost;
       const retain = Math.min(1, relics.reduce((sum, effect) => sum + (effect.type === 'shieldRetain' ? effect.ratio : 0), 0));
       next.shield = Math.floor((next.shield - shieldAbsorbed) * retain);
+      const goldStolen = Math.min(next.player.gold, ability(enemyDef, 'stealGold')?.amount ?? 0);
+      next.player.gold -= goldStolen;
       const before = junkCount(next.board);
-      const junk = addJunk(next.board, enemyDef.junkPerAction, rng, state.player.colors);
+      const junkTotal = enemyDef.junkPerAction + (next.enemy.enraged ? enrage?.junkBonus ?? 0 : 0);
+      const junk = addJunk(next.board, junkTotal, rng, state.player.colors, !!ability(enemyDef, 'hardJunk'));
       next.board = junk.board;
-      next.enemy.countdown = countdown(enemyDef, relics);
+      next.enemy.countdown = countdown(enemyDef, relics, next.enemy.enraged);
       next.rngState = rng.state();
-      enemyAction = { attack, shieldAbsorbed, hpLost, junkAdded: Math.max(0, junkCount(junk.board) - before), reshuffled: junk.reshuffled };
+      enemyAction = { attack, shieldAbsorbed, hpLost, goldStolen,
+        junkAdded: Math.max(0, junkCount(junk.board) - before), reshuffled: junk.reshuffled };
     }
     if (next.player.hp <= 0) next.status = 'lost';
   }
-  return { valid: true, steps: result.steps, effects: totals, reshuffled: result.reshuffled, enemyAction, state: next };
+  return { valid: true, steps: result.steps, effects: totals, enemyEvents: events, reshuffled: result.reshuffled, enemyAction, state: next };
 }

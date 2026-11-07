@@ -1,5 +1,5 @@
 import { BOARD_SIZE } from '../types';
-import type { Board, MatchGroup, Move, Pos, TurnResult } from '../types';
+import type { Blast, Board, MatchGroup, Move, Pos, TurnResult } from '../types';
 
 export interface Rect { x: number; y: number; w: number; h: number }
 export interface Insets { top: number; right: number; bottom: number; left: number }
@@ -89,7 +89,10 @@ export function dragMove(a: Pos, dx: number, dy: number, threshold: number): Mov
 }
 
 export type PhaseKind = 'swap' | 'clear' | 'fall' | 'enemy' | 'finish';
-export interface Phase { kind: PhaseKind; board: Board; duration: number; chain?: number; groups?: MatchGroup[]; reshuffled?: boolean; dropRows?: number[][] }
+export interface Phase {
+  kind: PhaseKind; board: Board; duration: number; chain?: number; groups?: MatchGroup[];
+  blasts?: Blast[]; blasted?: MatchGroup[]; reshuffled?: boolean; dropRows?: number[][];
+}
 
 // Gravity preserves the order of the surviving cells in each column. New cells
 // enter as a stack immediately above the board, one row per cleared space.
@@ -109,7 +112,9 @@ export function fallDistances(boardAfterClear: Board): number[][] {
 export function sameBoard(a: Board, b: Board): boolean {
   return a.length === b.length && a.every((row, y) => row.length === b[y]?.length && row.every((cell, x) => {
     const other = b[y]?.[x];
-    return cell?.kind === other?.kind && (cell?.kind !== 'gem' || (other?.kind === 'gem' && cell.color === other.color));
+    if (cell?.kind === 'gem') return other?.kind === 'gem' && cell.color === other.color && cell.special === other.special;
+    if (cell?.kind === 'junk') return other?.kind === 'junk' && !cell.hard === !other.hard;
+    return other === null || other === undefined;
   }));
 }
 
@@ -117,7 +122,9 @@ export function buildTimeline(initial: Board, result: TurnResult): Phase[] {
   if (!result.valid) return [];
   const phases: Phase[] = [{ kind: 'swap', board: initial, duration: 90 }];
   for (const step of result.steps) {
-    phases.push({ kind: 'clear', board: step.boardAfterClear, duration: 110, chain: step.chain, groups: step.groups });
+    // Blasts get a little longer on screen so the player can see what each one reached.
+    phases.push({ kind: 'clear', board: step.boardAfterClear, duration: step.blasts?.length ? 220 : 110,
+      chain: step.chain, groups: step.groups, blasts: step.blasts, blasted: step.blasted });
     phases.push({ kind: 'fall', board: step.boardAfter, duration: 120, chain: step.chain,
       dropRows: fallDistances(step.boardAfterClear) });
   }

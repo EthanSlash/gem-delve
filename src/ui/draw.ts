@@ -105,6 +105,18 @@ function board(ctx: CanvasRenderingContext2D, shape: Layout, cells: Board, view:
     }
     if (selected) drawSelection(ctx, x, y, s);
   }
+  // Blast areas flash in the special's color and fade over the clear phase.
+  if (view.phase?.kind === 'clear' && view.phase.blasts?.length) {
+    const fade = view.reduced ? .35 : .6 * (1 - view.progress);
+    for (const blast of view.phase.blasts) {
+      ctx.fillStyle = hues[blast.color];
+      for (const p of blast.cells) {
+        ctx.globalAlpha = fade * (p.row === blast.origin.row && p.col === blast.origin.col ? 1 : .7);
+        ctx.fillRect(b.x + p.col * s + 2, b.y + p.row * s + 2, s - 4, s - 4);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
   ctx.restore();
 }
 
@@ -177,6 +189,7 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
         line('有效交換才推進敵人倒數，歸零時攻擊。', 1);
         line('無效交換不扣步；護盾可以擋傷害。', 2);
         line('石塊不能交換，消除旁邊寶石即可清除。', 3);
+        line('四連以上會做出特殊寶石，消除時引爆。', 4, '#f3cb70');
         button(ctx, t.next);
         text(ctx, '下一步', t.next.x + t.next.w / 2, t.next.y + 22, 18, ink, 'center');
       }
@@ -275,8 +288,14 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
   ctx.restore();
   const copyW = narrow ? header.w - 12 : header.w - hero.w - 22;
   const hx = header.x + 10;
-  text(ctx, narrow ? `${run.floor} / ${content.enemies.length}` : `地城探險   ${run.floor} / ${content.enemies.length}`,
-    hx, header.y + 14, 12, '#c8ac79', 'left', 'bold');
+  const floorLabel = `${run.floor} / ${content.enemies.length}`;
+  text(ctx, floorLabel, hx, header.y + 14, 12, '#c8ac79', 'left', 'bold');
+  if (!narrow && enemy?.trait) {
+    ctx.font = 'bold 12px system-ui, sans-serif';
+    const traitX = hx + ctx.measureText(floorLabel).width + 10;
+    fittedText(ctx, enemy.trait, traitX, header.y + 14, copyW - (traitX - hx), 12,
+      combat.enemy.enraged ? '#ff9a8a' : '#d9b8f0', 'left', 'bold');
+  }
   fittedText(ctx, enemy?.name ?? '敵人', hx, header.y + (narrow ? 65 : 39), copyW,
     narrow ? 15 : 22, ink, 'left', 'bold');
   const resolved = view.phase?.kind === 'finish' || (view.phase?.kind === 'enemy' && view.progress > .5);
@@ -351,17 +370,36 @@ export function draw(ctx: CanvasRenderingContext2D, shape: Layout, view: View, c
       ctx.fillStyle = `rgba(233,106,96,${.26 * (1 - view.progress)})`; ctx.fillRect(0, 0, w, h);
       text(ctx, `敵人攻擊！  -${view.turn.enemyAction?.hpLost ?? 0} 生命`, shape.board.x + shape.board.w / 2,
         shape.board.y + shape.board.h / 2, 20, '#ffe0d3', 'center', 'bold');
-      if (view.turn.enemyAction?.junkAdded) text(ctx, `新增 ${view.turn.enemyAction.junkAdded} 顆石塊`, shape.board.x + shape.board.w / 2,
+      const action = view.turn.enemyAction;
+      const extras = [
+        action?.junkAdded ? `新增 ${action.junkAdded} 顆石塊` : '',
+        action?.goldStolen ? `偷走 ${action.goldStolen} 金幣` : '',
+      ].filter(Boolean).join('　');
+      if (extras) text(ctx, extras, shape.board.x + shape.board.w / 2,
         shape.board.y + shape.board.h / 2 + 30, 16, ink, 'center');
     }
-    if (phase.kind === 'finish' && phase.reshuffled)
-      text(ctx, '重新洗牌', shape.board.x + shape.board.w / 2, shape.board.y + shape.board.h / 2, 26, '#ffe4a1', 'center', 'bold');
+    const events = view.turn.enemyEvents;
+    const notice = phase.kind === 'finish' && phase.reshuffled ? '重新洗牌'
+      : phase.kind === 'finish' && events.enraged ? `${enemy?.name ?? '敵人'}狂暴了！`
+      : phase.kind === 'finish' && events.regenerated ? `${enemy?.name ?? '敵人'}分裂回復 ${events.regenerated}`
+      : '';
+    if (notice) text(ctx, notice, shape.board.x + shape.board.w / 2, shape.board.y + shape.board.h / 2, 24,
+      events.enraged && !phase.reshuffled ? '#ff9a8a' : '#ffe4a1', 'center', 'bold');
   }
   for (const number of view.fx.numbers) {
     const anchor = anchors[number.anchor];
     if (!anchor) continue;
     ctx.globalAlpha = Math.min(1, (650 - number.age) / 150);
-    text(ctx, number.value, anchor.x, anchor.y - (view.reduced ? 16 : 16 + number.age * .055), 20, number.color, 'center', 'bold');
+    // Keep long labels, such as damage with armor, inside the safe area near the screen edge.
+    ctx.font = 'bold 20px system-ui, sans-serif';
+    const half = ctx.measureText(number.value).width / 2;
+    const x = Math.min(Math.max(anchor.x, safe.x + half + 4), safe.x + safe.w - half - 4);
+    const y = anchor.y - (view.reduced ? 16 : 16 + number.age * .055);
+    // A dark outline keeps numbers legible over the enemy portrait and bright gems.
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(12,9,20,.9)'; ctx.lineWidth = 4;
+    ctx.strokeText(number.value, x, y);
+    text(ctx, number.value, x, y, 20, number.color, 'center', 'bold');
   }
   ctx.globalAlpha = 1;
 }

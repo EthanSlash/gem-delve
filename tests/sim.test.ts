@@ -9,7 +9,7 @@ import type { RunRecord } from '../sim/simulate';
 function fixture(): GameContent {
   return {
     enemies: [1, 2, 3].map(floor => ({ id: `enemy-${floor}`, name: '', maxHp: 3,
-      attack: 100, countdown: 1, junkPerAction: 0, isBoss: floor === 3 })),
+      attack: 100, countdown: 1, junkPerAction: 0, isBoss: floor === 3, abilities: [], trait: '' })),
     relics: [
       { id: 'heart', name: '', description: '', effects: [{ type: 'maxHp', amount: 5 }] },
       { id: 'blade', name: '', description: '', effects: [{ type: 'colorFlat', color: 'red', flat: 1 }] },

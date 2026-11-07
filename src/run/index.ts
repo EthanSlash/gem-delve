@@ -53,6 +53,7 @@ export function playMove(run: RunState, move: Move, content: GameContent): RunTu
   if (run.status !== 'combat') {
     const turn: TurnResult = {
       valid: false, steps: [], effects: { damage: 0, shield: 0, heal: 0, gold: 0 },
+      enemyEvents: { armorBlocked: 0, regenerated: 0, enraged: false },
       reshuffled: false, enemyAction: null, state: run.combat,
     };
     return { turn, run };

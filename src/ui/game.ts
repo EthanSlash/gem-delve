@@ -85,15 +85,18 @@ export function startGame(canvas: HTMLCanvasElement) {
 
   function soundPhase(phase: Phase) {
     if (phase.kind === 'clear') {
-      for (const group of phase.groups ?? []) for (const cell of group.cells)
+      for (const group of [...phase.groups ?? [], ...phase.blasted ?? []]) for (const cell of group.cells)
         fx.burst(shape.board.x + (cell.col + .5) * shape.cell, shape.board.y + (cell.row + .5) * shape.cell, group.color, shape.cell);
       audio.play('match', phase.chain);
+      if (phase.blasts?.length) { audio.play('hit'); fx.attack(); }
       if (phase.chain === 1) {
         const effects = animation!.result.turn.effects;
+        const { armorBlocked } = animation!.result.turn.enemyEvents;
         if (effects.damage) {
-          fx.hit(); fx.setHp(run!.combat!.enemy.hp, animation!.result.turn.state.enemy.hp);
-          fx.number('enemy', `-${effects.damage}`, '#ff9a8a');
-        }
+          const before = run!.combat!.enemy.hp;
+          fx.hit(); fx.setHp(before, Math.max(0, before - effects.damage));
+          fx.number('enemy', armorBlocked ? `-${effects.damage}（擋 ${armorBlocked}）` : `-${effects.damage}`, '#ff9a8a');
+        } else if (armorBlocked) fx.number('enemy', `護甲擋下 ${armorBlocked}`, '#c9d6d6');
         if (effects.heal) fx.number('heart', `+${effects.heal}`, '#7bd3a4');
         if (effects.shield) fx.number('shield', `+${effects.shield}`, '#b69ae9');
         if (effects.gold) fx.number('coin', `+${effects.gold}`, '#f3cb70');
@@ -103,7 +106,18 @@ export function startGame(canvas: HTMLCanvasElement) {
         if (animation?.result.turn.effects.gold) audio.play('gold');
       }
     }
-    if (phase.kind === 'enemy') { audio.play('enemyAttack'); fx.attack(); }
+    if (phase.kind === 'enemy') {
+      audio.play('enemyAttack'); fx.attack();
+      const stolen = animation?.result.turn.enemyAction?.goldStolen;
+      if (stolen) fx.number('coin', `-${stolen}`, '#f3cb70');
+    }
+    if (phase.kind === 'finish' && animation) {
+      const { regenerated } = animation.result.turn.enemyEvents;
+      if (regenerated) {
+        fx.setHp(animation.result.turn.state.enemy.hp - regenerated, animation.result.turn.state.enemy.hp);
+        fx.number('enemy', `+${regenerated}`, '#7bd3a4'); audio.play('heal');
+      }
+    }
   }
 
   function frame(time: number) {
@@ -196,7 +210,7 @@ export function startGame(canvas: HTMLCanvasElement) {
       if (next.step !== tutorial.step && next.result) {
         const formal = createRun(0, GAME_CONTENT).combat!;
         const turn = { ...next.result, effects: { damage: 0, shield: 0, heal: 0, gold: 0 },
-          reshuffled: next.result.reshuffled, enemyAction: null, state: { ...formal, board: next.board } };
+          enemyEvents: { armorBlocked: 0, regenerated: 0, enraged: false }, reshuffled: next.result.reshuffled, enemyAction: null, state: { ...formal, board: next.board } };
         tutorialAnimation = { phases: buildTimeline(tutorial.board, turn), move, start: performance.now(), last: -1, next };
         schedule();
       } else tutorial = next;
