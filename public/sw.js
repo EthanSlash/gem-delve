@@ -1,5 +1,8 @@
 const CACHE_VERSION = 'gem-delve-__BUILD_ID__';
 const PRECACHE_URLS = ['./manifest.webmanifest', './icons/icon-192.png'];
+// Every file in dist/assets, written in at build time. This includes images that only the
+// scripts reference, which collectAssetUrls cannot see in the page.
+const BUILD_ASSETS = /* __BUILD_ASSETS__ */ [];
 
 const collectAssetUrls = (html) => {
   const urls = [];
@@ -21,7 +24,10 @@ self.addEventListener('install', (event) => {
       try {
         const pageResponse = await fetch('./', { cache: 'reload' });
         if (!pageResponse || !pageResponse.ok) throw new Error('install failed: could not fetch the page');
-        const assetUrls = collectAssetUrls(await pageResponse.clone().text());
+        const assetUrls = new Set([
+          ...collectAssetUrls(await pageResponse.clone().text()),
+          ...BUILD_ASSETS.map((path) => new URL(path, self.registration.scope).href),
+        ]);
         const responses = await Promise.all(
           [...assetUrls, ...PRECACHE_URLS].map(async (url) => {
             const response = await fetch(url, { cache: 'reload' });

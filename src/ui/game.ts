@@ -1,4 +1,5 @@
 import { createAudio } from '../audio/index';
+import { loadEnemyArt } from './art';
 import { findValidMoves } from '../core/index';
 import { GAME_CONTENT } from '../data/index';
 import { chooseReward, createRun, playMove, rerollRewards } from '../run/index';
@@ -320,6 +321,8 @@ export function startGame(canvas: HTMLCanvasElement) {
     frame(now);
   });
   resize();
+  // Drawn art shows until the images arrive; the title screen usually covers the wait.
+  void loadEnemyArt().then(() => render());
 
   if (import.meta.env.DEV) {
     Object.assign(window, { __gemDelve: {

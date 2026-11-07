@@ -1,5 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { cacheKey, keepRecentSizes } from '../src/ui/art';
+import { ENEMY_IMAGE_URLS, cacheKey, enemyImageUrls, fitContain, keepRecentSizes } from '../src/ui/art';
+import { GAME_CONTENT } from '../src/data/index';
+
+describe('enemy images', () => {
+  it('maps files to enemy ids by name and prefers webp over png', () => {
+    expect(enemyImageUrls({
+      '../assets/enemies/slime.png': 'a.png',
+      '../assets/enemies/caveBat.webp': 'b.webp',
+      '../assets/enemies/caveBat.png': 'b.png',
+      '../assets/enemies/notes.txt': 'c.txt',
+    })).toEqual({ slime: 'a.png', caveBat: 'b.webp' });
+  });
+
+  it('only ships images named after an existing enemy', () => {
+    const ids = GAME_CONTENT.enemies.map(enemy => enemy.id);
+    for (const id of Object.keys(ENEMY_IMAGE_URLS)) expect(ids).toContain(id);
+  });
+
+  it('fits an image inside the box, keeping its aspect ratio and centering it', () => {
+    expect(fitContain(512, 512, 78, 78)).toEqual({ x: 0, y: 0, w: 78, h: 78 });
+    expect(fitContain(200, 100, 80, 80)).toEqual({ x: 0, y: 20, w: 80, h: 40 });
+    expect(fitContain(100, 200, 80, 80)).toEqual({ x: 20, y: 0, w: 40, h: 80 });
+    expect(fitContain(0, 0, 80, 60)).toEqual({ x: 0, y: 0, w: 80, h: 60 });
+  });
+});
 
 describe('art raster cache keys', () => {
   it('imports without a DOM and separates sprite types and CSS sizes', () => {

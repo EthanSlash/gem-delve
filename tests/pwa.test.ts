@@ -141,4 +141,17 @@ describe('service worker build stamp', () => {
     expect(stamped).not.toBe(stampServiceWorker(source, ['b.js', 'a.css'], '<html>two</html>'));
     expect(source).toContain('__BUILD_ID__');
   });
+
+  it('writes every built asset into the precache list with forward slashes', () => {
+    const stamped = stampServiceWorker(swSource, ['index-1.js', 'img\\slime-2.webp'], '<html></html>');
+    expect(stamped).not.toContain('__BUILD_ASSETS__');
+    expect(stamped).toContain('const BUILD_ASSETS = ["assets/img/slime-2.webp","assets/index-1.js"];');
+    expect(stamped).toBe(stampServiceWorker(swSource, ['img/slime-2.webp', 'index-1.js'], '<html></html>'));
+  });
+
+  it('precaches the build asset list alongside the assets found in the page', () => {
+    expect(swSource).toContain('const BUILD_ASSETS = /* __BUILD_ASSETS__ */ [];');
+    const installSource = swSource.split("addEventListener('install'")[1]!.split("addEventListener('activate'")[0]!;
+    expect(installSource).toContain('BUILD_ASSETS.map');
+  });
 });

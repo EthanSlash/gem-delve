@@ -249,9 +249,53 @@ function creature(ctx: CanvasRenderingContext2D, id: string) {
   }
 }
 
+// Maps image files to enemy ids by file name, e.g. '../assets/enemies/caveBat.webp' -> 'caveBat'.
+// When one enemy has both a .png and a .webp, the .webp wins.
+export function enemyImageUrls(files: Record<string, string>): Record<string, string> {
+  const urls: Record<string, string> = {};
+  for (const path of Object.keys(files).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const match = /([^/\\]+)\.(png|webp)$/i.exec(path);
+    if (match) urls[match[1]!] = files[path]!;
+  }
+  return urls;
+}
+
+// Largest rect with the image's aspect ratio that fits in the box, centered.
+export function fitContain(imageW: number, imageH: number, boxW: number, boxH: number): Rect {
+  if (imageW <= 0 || imageH <= 0) return { x: 0, y: 0, w: boxW, h: boxH };
+  const s = Math.min(boxW / imageW, boxH / imageH);
+  const w = imageW * s, h = imageH * s;
+  return { x: (boxW - w) / 2, y: (boxH - h) / 2, w, h };
+}
+
+// Drop files named after an enemy id into src/assets/enemies/ to replace its drawn art.
+export const ENEMY_IMAGE_URLS = enemyImageUrls(import.meta.glob('../assets/enemies/*.{png,webp}',
+  { eager: true, query: '?url', import: 'default' }) as Record<string, string>);
+const enemyImages = new Map<string, HTMLImageElement>();
+
+// Resolves once every enemy image has loaded or failed. A failed image keeps the drawn art.
+export function loadEnemyArt(): Promise<void> {
+  return Promise.all(Object.entries(ENEMY_IMAGE_URLS).map(async ([id, url]) => {
+    const image = new Image();
+    image.src = url;
+    try {
+      await image.decode();
+      if (image.naturalWidth > 0) enemyImages.set(id, image);
+    } catch { /* keep the drawn fallback */ }
+  })).then(() => undefined);
+}
+
 export function drawEnemy(ctx: CanvasRenderingContext2D, id: string, rect: Rect, flash: number) {
   const dpr = scale(ctx);
-  const sprite = cachedSprite(`enemy:${id}`, rect.w, rect.h, dpr, surface => {
+  const image = enemyImages.get(id);
+  const kind = image ? `enemy:${id}:image` : `enemy:${id}`;
+  const sprite = cachedSprite(kind, rect.w, rect.h, dpr, surface => {
+    if (image) {
+      const fit = fitContain(image.naturalWidth, image.naturalHeight, rect.w, rect.h);
+      surface.imageSmoothingQuality = 'high';
+      surface.drawImage(image, fit.x, fit.y, fit.w, fit.h);
+      return;
+    }
     surface.scale(rect.w / 100, rect.h / 100);
     creature(surface, id);
   });
@@ -260,7 +304,7 @@ export function drawEnemy(ctx: CanvasRenderingContext2D, id: string, rect: Rect,
     ctx.save(); ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = Math.min(1, Math.max(0, flash));
     // Tint only opaque creature pixels, leaving the sprite's transparent margin untouched.
-    const tinted = cachedSprite(`enemy:${id}:white`, rect.w, rect.h, dpr, surface => {
+    const tinted = cachedSprite(`${kind}:white`, rect.w, rect.h, dpr, surface => {
       surface.drawImage(sprite, 0, 0, rect.w, rect.h);
       surface.globalCompositeOperation = 'source-in';
       surface.fillStyle = '#fff'; surface.fillRect(0, 0, rect.w, rect.h);
