@@ -28,9 +28,17 @@ export function keepRecentSizes<T>(cache: Map<string, T>, key: string, value: T)
 const sprites = new Map<string, Map<string, HTMLCanvasElement>>();
 const backgrounds = new Map<string, HTMLCanvasElement>();
 
+// Rounds a transform scale up to the next quarter step. Animated transforms, such as the
+// enemy's breathing, change the raw scale every frame; without steps every frame would miss
+// the sprite cache and re-raster. Rounding up keeps sprites at least as sharp as needed.
+export function rasterScale(raw: number): number {
+  if (!Number.isFinite(raw)) return 1;
+  return Math.max(1, Math.ceil(raw * 4 - 1e-6) / 4);
+}
+
 function scale(ctx: CanvasRenderingContext2D): number {
   const transform = ctx.getTransform();
-  return Math.max(1, Math.hypot(transform.a, transform.b), Math.hypot(transform.c, transform.d));
+  return rasterScale(Math.max(Math.hypot(transform.a, transform.b), Math.hypot(transform.c, transform.d)));
 }
 
 function raster(width: number, height: number, dpr: number, paint: (ctx: CanvasRenderingContext2D) => void): HTMLCanvasElement {

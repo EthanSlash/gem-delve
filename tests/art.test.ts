@@ -1,6 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { ENEMY_IMAGE_URLS, cacheKey, enemyImageUrls, fitContain, keepRecentSizes } from '../src/ui/art';
+import { ENEMY_IMAGE_URLS, cacheKey, enemyImageUrls, fitContain, keepRecentSizes, rasterScale } from '../src/ui/art';
 import { GAME_CONTENT } from '../src/data/index';
+import { enemyPose } from '../src/ui/enemy-motion';
+
+describe('raster scale steps', () => {
+  it('rounds up to quarter steps, never below 1, and keeps exact steps', () => {
+    expect(rasterScale(2)).toBe(2);
+    expect(rasterScale(2 + 1e-12)).toBe(2);
+    expect(rasterScale(2.01)).toBe(2.25);
+    expect(rasterScale(1.1)).toBe(1.25);
+    expect(rasterScale(0.5)).toBe(1);
+    expect(rasterScale(NaN)).toBe(1);
+  });
+
+  it('gives an idle breathing enemy at most two cache variants, so the cache keeps hitting', () => {
+    for (const dpr of [1, 1.5, 2, 2.625, 3]) for (const id of GAME_CONTENT.enemies.map(enemy => enemy.id)) {
+      const steps = new Set<number>();
+      for (let time = 0; time < 5000; time += 16) {
+        const pose = enemyPose(id, { time, reduced: false });
+        const raw = dpr * Math.max(Math.abs(pose.scaleX), Math.abs(pose.scaleY));
+        const step = rasterScale(raw);
+        expect(step).toBeGreaterThanOrEqual(raw - 1e-9);
+        steps.add(step);
+      }
+      expect(steps.size).toBeLessThanOrEqual(2);
+    }
+  });
+});
 
 describe('enemy images', () => {
   it('maps files to enemy ids by name and prefers webp over png', () => {
